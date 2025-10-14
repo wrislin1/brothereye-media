@@ -1,0 +1,452 @@
+---
+# ============================================================================
+# Caddy - Reverse Proxy with Automatic HTTPS (OPTIONAL)
+# ============================================================================
+# Part of Brother Eye Media Stack
+# File: docker/compose/caddy.yml
+#
+# ⚠️  IMPORTANT: THIS SERVICE IS OPTIONAL ⚠️
+#
+# Purpose:
+#   - Provides HTTPS access to services via reverse proxy
+#   - Automatic Let's Encrypt SSL certificate management
+#   - Unified access via subdomains (e.g., jellyfin.yourdomain.com)
+#   - Simple configuration via Caddyfile
+#
+# When to Use:
+#   ✓ You want HTTPS access from outside your network
+#   ✓ You have a domain name (or dynamic DNS)
+#   ✓ You're comfortable exposing services to internet (with proper auth)
+#
+# When NOT to Use (Recommended for Privacy):
+#   ✓ Use VPN (WireGuard) instead for secure remote access
+#   ✓ Keep all services internal and access via VPN tunnel
+#   ✓ This maintains maximum privacy without exposing any ports
+#
+# Security Considerations:
+#   - Exposing services to internet increases attack surface
+#   - Requires strong passwords and fail2ban
+#   - Consider VPN as more secure alternative
+#   - If using Caddy, enable auth on sensitive services
+#
+# Requirements:
+#   - Domain name or dynamic DNS (e.g., duckdns.org)
+#   - Port 80 and 443 forwarded from router to this host
+#   - DNS A records pointing to your public IP
+# ============================================================================
+
+services:
+  caddy:
+    image: caddy:latest
+    container_name: caddy
+    hostname: caddy
+    restart: unless-stopped
+
+    # ========================================================================
+    # Network Configuration
+    # ========================================================================
+    networks:
+      - media-network
+    ports:
+      - "80:80"      # HTTP (redirects to HTTPS)
+      - "443:443"    # HTTPS
+      - "443:443/udp"  # HTTP/3 (QUIC)
+
+    # ========================================================================
+    # Environment Variables
+    # ========================================================================
+    environment:
+      - PUID=${PUID}        # User ID (default: 1000)
+      - PGID=${PGID}        # Group ID (default: 100)
+      - TZ=${TZ}            # Timezone
+      # Optional: Specify email for Let's Encrypt notifications
+      - ACME_EMAIL=${ACME_EMAIL:-}
+
+    # ========================================================================
+    # Volume Mappings
+    # ========================================================================
+    volumes:
+      # Caddyfile configuration
+      - ${CONFIG_ROOT}/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+
+      # Certificate storage and state
+      - ${CONFIG_ROOT}/caddy/data:/data
+      - ${CONFIG_ROOT}/caddy/config:/config
+
+      # Optional: Custom site files (if serving static content)
+      # - ${CONFIG_ROOT}/caddy/site:/srv:ro
+
+    # ========================================================================
+    # Resource Limits (Optional)
+    # ========================================================================
+    # Caddy is very lightweight
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '0.5'
+    #       memory: 256M
+    #     reservations:
+    #       memory: 128M
+
+    # ========================================================================
+    # Labels
+    # ========================================================================
+    labels:
+      - "com.brothereye.service=caddy"
+      - "com.brothereye.description=Reverse proxy with automatic HTTPS"
+      - "com.brothereye.port=443"
+      - "com.brothereye.optional=true"
+
+    # ========================================================================
+    # Health Check
+    # ========================================================================
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:2019/config/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+# ============================================================================
+# Network Definition
+# ============================================================================
+# Uses external network defined in main docker-compose.yml
+networks:
+  media-network:
+    external: true
+
+# ============================================================================
+# Configuration Notes
+# ============================================================================
+#
+# ⚠️  PRIVACY NOTICE ⚠️
+# Using this reverse proxy exposes services to the internet. For maximum
+# privacy and security, consider using VPN (WireGuard) instead to access
+# your services remotely without exposing any ports publicly.
+#
+# PREREQUISITES:
+# 1. Domain name (purchase from registrar or use free dynamic DNS)
+# 2. DNS A records pointing to your public IP:
+#    - jellyfin.yourdomain.com → Your Public IP
+#    - sonarr.yourdomain.com → Your Public IP
+#    - radarr.yourdomain.com → Your Public IP
+#    - etc.
+# 3. Port forwarding on router:
+#    - External 80 → Internal <host-ip>:80
+#    - External 443 → Internal <host-ip>:443
+# 4. Create Caddyfile (see example below)
+#
+# DYNAMIC DNS (FREE OPTION):
+# If you don't have a static IP, use dynamic DNS:
+# - DuckDNS (free): https://www.duckdns.org/
+# - No-IP (free tier): https://www.noip.com/
+# - Cloudflare (with API update script)
+# These services provide a domain and auto-update when your IP changes
+#
+# CREATING THE CADDYFILE:
+# 1. Create directory: mkdir -p /opt/docker/config/caddy
+# 2. Create file: /opt/docker/config/caddy/Caddyfile
+# 3. Use example below as starting point
+# 4. Replace "yourdomain.com" with your actual domain
+# 5. Adjust service URLs as needed
+#
+# EXAMPLE CADDYFILE (BASIC):
+# ============================================================================
+# # Global options
+# {
+#     email your-email@example.com
+#     # Optional: Use Cloudflare DNS for validation (if behind firewall)
+#     # acme_dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+# }
+#
+# # Jellyfin - Media Server
+# jellyfin.yourdomain.com {
+#     reverse_proxy jellyfin:8096
+#     encode gzip
+# }
+#
+# # Jellyseerr - Request Management
+# requests.yourdomain.com {
+#     reverse_proxy jellyseerr:5055
+#     encode gzip
+# }
+#
+# # Sonarr - TV Shows (PROTECT THIS!)
+# sonarr.yourdomain.com {
+#     reverse_proxy sonarr:8989
+#     encode gzip
+#     # Add basic auth or IP restriction
+#     basicauth {
+#         admin $2a$14$HASH_GENERATED_BY_CADDY
+#     }
+# }
+#
+# # Radarr - Movies (PROTECT THIS!)
+# radarr.yourdomain.com {
+#     reverse_proxy radarr:7878
+#     encode gzip
+#     basicauth {
+#         admin $2a$14$HASH_GENERATED_BY_CADDY
+#     }
+# }
+#
+# # Prowlarr - Indexers (PROTECT THIS!)
+# prowlarr.yourdomain.com {
+#     reverse_proxy prowlarr:9696
+#     encode gzip
+#     basicauth {
+#         admin $2a$14$HASH_GENERATED_BY_CADDY
+#     }
+# }
+#
+# # NZBGet - Downloader (PROTECT THIS! Or don't expose at all)
+# # Access via gluetun container port
+# downloads.yourdomain.com {
+#     reverse_proxy gluetun:6789
+#     encode gzip
+#     basicauth {
+#         admin $2a$14$HASH_GENERATED_BY_CADDY
+#     }
+# }
+#
+# # Bazarr - Subtitles
+# bazarr.yourdomain.com {
+#     reverse_proxy bazarr:6767
+#     encode gzip
+#     basicauth {
+#         admin $2a$14$HASH_GENERATED_BY_CADDY
+#     }
+# }
+# ============================================================================
+#
+# EXAMPLE CADDYFILE (WITH AUTHENTICATION):
+# ============================================================================
+# {
+#     email your-email@example.com
+# }
+#
+# # Public services (with their own auth)
+# jellyfin.yourdomain.com {
+#     reverse_proxy jellyfin:8096
+#     encode gzip
+#     
+#     # Additional security headers
+#     header {
+#         Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+#         X-Content-Type-Options "nosniff"
+#         X-Frame-Options "SAMEORIGIN"
+#         Referrer-Policy "no-referrer-when-downgrade"
+#     }
+# }
+#
+# requests.yourdomain.com {
+#     reverse_proxy jellyseerr:5055
+#     encode gzip
+# }
+#
+# # Admin services (require authentication)
+# (admin-auth) {
+#     basicauth {
+#         admin JDJhJDE0JEhhc2hHZW5lcmF0ZWRCeUNhZGR5
+#     }
+# }
+#
+# sonarr.yourdomain.com {
+#     import admin-auth
+#     reverse_proxy sonarr:8989
+#     encode gzip
+# }
+#
+# radarr.yourdomain.com {
+#     import admin-auth
+#     reverse_proxy radarr:7878
+#     encode gzip
+# }
+#
+# prowlarr.yourdomain.com {
+#     import admin-auth
+#     reverse_proxy prowlarr:9696
+#     encode gzip
+# }
+# ============================================================================
+#
+# GENERATING BASIC AUTH HASH:
+# Use Caddy to generate bcrypt hash:
+#   docker run --rm caddy:latest caddy hash-password
+# Enter password when prompted, copy the hash to Caddyfile
+#
+# Or use online tool (less secure):
+#   https://hostingcanada.org/htpasswd-generator/
+# Select "bcrypt" algorithm
+#
+# ADVANCED: IP WHITELISTING
+# Only allow access from specific IPs:
+# ============================================================================
+# sonarr.yourdomain.com {
+#     @allowed {
+#         remote_ip 203.0.113.0/24  # Your IP range
+#     }
+#     handle @allowed {
+#         reverse_proxy sonarr:8989
+#     }
+#     handle {
+#         abort
+#     }
+# }
+# ============================================================================
+#
+# CLOUDFLARE TUNNEL (ALTERNATIVE):
+# Instead of port forwarding, use Cloudflare Tunnel (free):
+# - No ports exposed on router
+# - Traffic goes through Cloudflare
+# - Built-in DDoS protection
+# - See: https://www.cloudflare.com/products/tunnel/
+#
+# TESTING CONFIGURATION:
+# 1. Test Caddyfile syntax:
+#    docker exec caddy caddy validate --config /etc/caddy/Caddyfile
+# 2. Reload configuration:
+#    docker exec caddy caddy reload --config /etc/caddy/Caddyfile
+# 3. Check logs:
+#    docker logs caddy
+#
+# CERTIFICATE MANAGEMENT:
+# - Caddy automatically obtains Let's Encrypt certificates
+# - Certificates stored in /opt/docker/config/caddy/data
+# - Auto-renewal happens in background (30 days before expiry)
+# - No manual intervention needed
+# - HTTPS enabled automatically
+# - HTTP traffic auto-redirects to HTTPS
+#
+# CERTIFICATE STORAGE:
+# /opt/docker/config/caddy/data/caddy/certificates/
+# - acme-v02.api.letsencrypt.org-directory/
+#   - yourdomain.com/
+#     - yourdomain.com.crt (certificate)
+#     - yourdomain.com.key (private key)
+#
+# Backup this directory to preserve certificates
+#
+# TROUBLESHOOTING CERTIFICATES:
+# 1. Certificate not issued:
+#    - Verify DNS points to your IP: nslookup jellyfin.yourdomain.com
+#    - Check port 80 is accessible from internet
+#    - Check Caddy logs: docker logs caddy
+#    - Try manually: curl http://yourdomain.com/.well-known/acme-challenge/test
+#
+# 2. Rate limits:
+#    - Let's Encrypt has rate limits (50 certs per domain per week)
+#    - Use staging environment for testing:
+#      Add to global options: acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+#
+# 3. Firewall blocking:
+#    - Ensure router forwards ports 80 and 443
+#    - Check no firewall blocking on OPNsense
+#    - Test: telnet your-public-ip 443
+#
+# PERFORMANCE:
+# - Caddy is very efficient and lightweight
+# - Can handle thousands of concurrent connections
+# - Uses Go's native HTTP/2 implementation
+# - Supports HTTP/3 (QUIC) out of the box
+# - Minimal latency overhead (< 1ms typically)
+#
+# SECURITY BEST PRACTICES:
+# 1. Use strong passwords (generated, 20+ characters)
+# 2. Enable fail2ban on host to ban brute-force attempts
+# 3. Only expose services that need external access
+# 4. Keep Jellyfin/Jellyseerr public-facing (they have auth)
+# 5. ALWAYS protect admin services (Sonarr/Radarr/etc.) with auth
+# 6. Never expose NZBGet without auth (or better: don't expose at all)
+# 7. Monitor logs regularly for suspicious activity
+# 8. Keep Caddy updated (docker-compose pull)
+# 9. Use Cloudflare or similar for DDoS protection
+# 10. Consider geofencing (block countries you don't need)
+#
+# FAIL2BAN INTEGRATION:
+# Protect Caddy from brute-force attacks:
+# 1. Install fail2ban on host
+# 2. Configure jail for Caddy logs
+# 3. Ban IPs with too many 401/403 responses
+# 4. Example filter: /etc/fail2ban/filter.d/caddy-auth.conf
+#
+# LOGS:
+# - Caddy logs to stdout (view with: docker logs caddy)
+# - Access logs disabled by default (privacy)
+# - Enable if needed in Caddyfile: log { output file /data/access.log }
+# - Error logs always available
+#
+# UPDATES:
+# - Caddy updates frequently with security patches
+# - Update via: docker-compose pull caddy && docker-compose up -d
+# - Breaking changes are rare
+# - Check release notes: https://github.com/caddyserver/caddy/releases
+#
+# MONITORING:
+# - Caddy has built-in admin API on port 2019 (internal only)
+# - Can query config: http://localhost:2019/config/
+# - Prometheus metrics available: http://localhost:2019/metrics
+# - Health endpoint: http://localhost:2019/health
+#
+# ALTERNATIVE: TRAEFIK
+# If you prefer Traefik (more Docker-native):
+# - image: traefik:latest
+# - Config via labels on containers
+# - More complex but more flexible
+# - Better for many containers
+# - Caddy is simpler for small setups
+#
+# ALTERNATIVE: NGINX PROXY MANAGER
+# If you prefer a web UI:
+# - image: jc21/nginx-proxy-manager:latest
+# - GUI for managing proxy configs
+# - Let's Encrypt integration
+# - Good for non-technical users
+# - More resource-heavy than Caddy
+#
+# LOCAL-ONLY REVERSE PROXY:
+# If you want HTTPS locally (without public exposure):
+# 1. Use mkcert to generate local certificates
+# 2. Trust root CA on your devices
+# 3. Configure Caddy with local domain (e.g., jellyfin.local)
+# 4. Don't port forward 80/443
+# 5. Access only from LAN or VPN
+#
+# RECOMMENDED APPROACH:
+# For maximum privacy and security:
+# 1. Don't use this reverse proxy at all
+# 2. Set up WireGuard VPN server on OPNsense
+# 3. Connect to VPN from remote devices
+# 4. Access all services via internal IPs
+# 5. No ports exposed to internet
+# 6. End-to-end encrypted via VPN
+# 7. No attack surface for hackers
+#
+# This aligns with your privacy-first architecture!
+#
+# WHEN TO USE CADDY:
+# - You need to share Jellyfin with family/friends
+# - They can't/won't use VPN
+# - You're comfortable with security implications
+# - You implement proper authentication
+# - You monitor logs and use fail2ban
+#
+# MIXED APPROACH:
+# - Expose only Jellyfin and Jellyseerr (user-facing)
+# - Keep admin services (Sonarr/Radarr/etc.) VPN-only
+# - Best of both worlds: convenience + security
+#
+# BACKUP:
+# - Caddyfile: /opt/docker/config/caddy/Caddyfile
+# - Certificates: /opt/docker/config/caddy/data
+# - Backup before changes
+# - Test in staging first
+#
+# RESOURCES:
+# - Caddy Documentation: https://caddyserver.com/docs/
+# - Caddyfile Tutorial: https://caddyserver.com/docs/caddyfile-tutorial
+# - Community Forum: https://caddy.community/
+# - GitHub: https://github.com/caddyserver/caddy
+# - Docker Image: https://hub.docker.com/_/caddy
+#
+# ============================================================================

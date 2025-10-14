@@ -1,0 +1,393 @@
+################################################################################
+# Radarr - Movie Automation
+#
+# Radarr automates movie downloading, organization, and library management.
+# It monitors for new releases, searches for movies, and sends them to NZBGet.
+#
+# Key Features:
+#   - Automatic movie monitoring
+#   - Quality profiles and custom formats (.NET 6 / v4+)
+#   - Calendar and upcoming releases
+#   - Automatic movie renaming
+#   - Collection management
+#   - API for external integrations (Jellyseerr)
+#
+# Network Architecture:
+#   - Runs on media-network (NOT through VPN)
+#   - Queries Prowlarr for indexers
+#   - Sends downloads to NZBGet (via gluetun hostname)
+#   - Manages /mnt/media/Movies directory
+#   - Integrates with Jellyfin via library path
+#
+# Documentation: https://wiki.servarr.com/radarr
+################################################################################
+
+services:
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    hostname: radarr
+    
+    # Ports exposed to host
+    ports:
+      - "${RADARR_PORT:-7878}:7878"
+    
+    # Environment variables
+    environment:
+      # User and Group IDs (must match NAS permissions)
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-100}
+      
+      # Timezone
+      - TZ=${TZ:-America/New_York}
+      
+      # Optional: Set umask for file permissions
+      - UMASK=002
+    
+    # Volumes for persistent data
+    volumes:
+      # Radarr configuration directory
+      # Contains config.xml, database, and logs
+      - ${CONFIG_BASE:-/opt/docker/config}/radarr:/config
+      
+      # Movie library directory (where Radarr manages movies)
+      - ${MOVIES_DIR:-/mnt/media/Movies}:/movies
+      
+      # Download directory (where NZBGet places completed downloads)
+      # Radarr imports from here and moves to /movies
+      - ${DOWNLOADS_DIR:-/mnt/media/downloads}:/downloads
+      
+      # Optional: Additional paths for library organization
+      # - ${MOVIES_4K_DIR:-/mnt/media/Movies-4K}:/movies-4k
+    
+    # Networks
+    networks:
+      - media-network
+    
+    # Restart policy
+    restart: ${RESTART_POLICY:-unless-stopped}
+    
+    # Health check
+    # Verifies Radarr API is responding
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7878/ping", "||", "exit", "1"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    
+    # Resource limits (optional)
+    deploy:
+      resources:
+        limits:
+          memory: ${RADARR_MEM_LIMIT:-1g}
+        reservations:
+          memory: 256m
+    
+    # Labels for management
+    labels:
+      - "com.brothereye.service=radarr"
+      - "com.brothereye.description=Movie automation and management"
+      - "com.brothereye.group=automation"
+      - "com.brothereye.url=http://${LXC_IP}:7878"
+
+################################################################################
+# NOTES
+################################################################################
+
+# Initial Setup:
+#   1. Access web UI: http://LXC_IP:7878
+#   2. Settings → Media Management:
+#      - Enable "Rename Movies"
+#      - Standard movie format: {Movie Title} ({Release Year})
+#      - Movie folder format: {Movie Title} ({Release Year})
+#      - Create empty movie folders: No (optional)
+#      - Delete empty folders: Yes
+#      - Unmonitor Deleted Movies: Yes
+#   3. Settings → Profiles → Quality Profiles:
+#      - Create or modify profiles (HD-1080p, UHD-2160p, etc.)
+#   4. Settings → General:
+#      - Authentication: Forms (Recommended)
+#      - Copy API Key for later use
+#
+# Connecting to Prowlarr:
+#   This is automatic if Prowlarr is configured correctly!
+#   Prowlarr will push indexers to Radarr automatically.
+#   
+#   Verify in: Settings → Indexers
+#   You should see indexers synced from Prowlarr
+#
+# Connecting to NZBGet:
+#   Settings → Download Clients → Add → NZBGet
+#   - Name: NZBGet
+#   - Host: gluetun (IMPORTANT: use gluetun, not nzbget!)
+#   - Port: 6789
+#   - Username: (your NZBGet username)
+#   - Password: (your NZBGet password)
+#   - Category: movies
+#   - Use SSL: No (internal network)
+#   - Test and Save
+#
+# Adding Movies:
+#   1. Movies → Add New
+#   2. Search for movie title
+#   3. Select correct movie (verify year)
+#   4. Root folder: /movies
+#   5. Quality Profile: HD-1080p (or your preference)
+#   6. Monitor: Yes
+#   7. Search on Add: Yes (immediate search)
+#   8. Add Movie
+#
+# Quality Profiles (Radarr v4):
+#   Settings → Profiles → Quality Profiles
+#   Example HD-1080p profile:
+#   - Bluray-1080p (preferred)
+#   - WEBDL-1080p
+#   - WEBRip-1080p
+#   - HDTV-1080p
+#   
+#   Custom Formats (advanced):
+#   - Prefer remux over compressed
+#   - Avoid CAM/TS releases
+#   - Prefer HDR/DV for 4K
+#   - See TRaSH Guides for optimal setups
+#
+# Monitoring:
+#   Activity → Queue: Active downloads
+#   Calendar: Upcoming releases (theater/digital)
+#   System → Status: System health
+#   System → Tasks: Automated tasks
+#
+# Automatic Search:
+#   Radarr automatically searches for monitored movies
+#   Runs on schedule (configurable in System → Tasks)
+#   Also triggers when:
+#   - New movie added with "Search on Add"
+#   - Movie released (becomes available)
+#   - RSS feed check (every 15 minutes)
+#
+# Manual Search:
+#   Movies → [select movie]
+#   Click magnifying glass icon (Manual Search)
+#   Choose from available releases
+#   Click download icon to grab
+#
+# Import Existing Library:
+#   If you already have movies:
+#   1. Place them in /movies following structure:
+#      /movies/Movie Name (2020)/Movie Name (2020).mkv
+#   2. Movies → Import Library
+#   3. Select /movies
+#   4. Map movies to TMDB entries
+#   5. Import
+#
+# Movie Naming:
+#   Radarr renames movies automatically
+#   Default format: Movie Title (Year)
+#   Customize in: Settings → Media Management → Movie Naming
+#   
+#   Examples:
+#   - {Movie Title} ({Release Year})
+#   - {Movie Title} ({Release Year}) [{Quality Full}]
+#   - {Movie Title} ({Release Year}) - {Edition Tags} [{Quality Full}]
+#
+# Folder Structure:
+#   Radarr creates one folder per movie:
+#   /movies/
+#     ├── Inception (2010)/
+#     │   └── Inception (2010).mkv
+#     ├── The Matrix (1999)/
+#     │   └── The Matrix (1999).mkv
+#     └── Interstellar (2014)/
+#         └── Interstellar (2014).mkv
+#
+# Integration with Jellyfin:
+#   Radarr organizes movies in /movies
+#   Jellyfin scans /movies for content
+#   Radarr can notify Jellyfin of new content:
+#   Settings → Connect → Add → Emby/Jellyfin
+#   - Host: http://jellyfin:8096
+#   - API Key: (from Jellyfin)
+#   - Update Library: Yes
+#
+# Integration with Jellyseerr:
+#   Jellyseerr connects to Radarr:
+#   - Radarr URL: http://radarr:7878
+#   - API Key: (from Radarr Settings → General)
+#   Users request movies in Jellyseerr
+#   Jellyseerr adds them to Radarr automatically
+#   Radarr searches and downloads
+#
+# Root Folders:
+#   /movies - Primary movie library
+#   Can add multiple root folders:
+#   - /movies - 1080p movies
+#   - /movies-4k - 4K/UHD movies (separate library)
+#   Settings → Media Management → Root Folders
+#
+# Quality Definitions:
+#   Settings → Quality → Quality Definitions
+#   Set min/max file sizes per quality
+#   Prevents downloading tiny or huge files
+#   
+#   Example for 1080p 2-hour movie:
+#   - Min: 3000 MB
+#   - Preferred: 8000 MB
+#   - Max: 20000 MB
+#
+# Custom Formats (v4 Feature):
+#   Settings → Profiles → Custom Formats
+#   Examples:
+#   - Prefer x265 (smaller, same quality)
+#   - Require HDR for 4K
+#   - Avoid hardcoded subs
+#   - Prefer specific release groups (RARBG, SPARKS, etc.)
+#   - Avoid CAM/TS (theater recordings)
+#   
+#   See: https://trash-guides.info/Radarr/
+#
+# Download Client Categories:
+#   NZBGet categories help organize downloads
+#   Radarr sends to "movies" category
+#   NZBGet processes and places in /downloads/movies
+#   Radarr imports from /downloads/movies to /movies
+#
+# Collections:
+#   Radarr supports movie collections:
+#   - Marvel Cinematic Universe
+#   - Lord of the Rings
+#   - James Bond
+#   Enable: Settings → Media Management → Movie Collections
+#   Radarr can auto-monitor entire collections
+#
+# Minimum Availability:
+#   When Radarr starts searching:
+#   - Announced: As soon as announced (preorder)
+#   - In Cinemas: Theater release date
+#   - Released: Physical/digital release date
+#   
+#   Recommendation: "Released" to avoid CAM quality
+#   Settings → Media Management → Minimum Availability
+#
+# Failed Download Handling:
+#   Settings → Download Clients → Failed Download Handling
+#   - Redownload: Yes (automatic retry)
+#   - Remove: Yes (clean up failed)
+#   Radarr automatically grabs alternative release
+#
+# Troubleshooting:
+#   1. Check logs: docker compose logs radarr
+#   2. System → Logs in web UI
+#   3. System → Status for warnings
+#   4. Test download client connection
+#   5. Test indexer searches
+#   6. Verify permissions on /movies directory (1000:100)
+#   7. Check Prowlarr sync status
+#
+# Common Issues:
+#   - "No indexers available": Connect Prowlarr
+#   - "Download client unavailable": Check Gluetun is running
+#   - "Import failed": Check file permissions
+#   - "Movie not found": Check TMDB for correct title/year
+#   - "No search results": Movie might not be released yet
+#
+# API Access:
+#   External tools use:
+#   - URL: http://radarr:7878 (internal) or http://LXC_IP:7878 (external)
+#   - API Key: Settings → General
+#   - Endpoints: /api/v3/*
+#
+# Backup:
+#   Important files in /config:
+#   - config.xml (main configuration)
+#   - radarr.db (database with movies and settings)
+#   - Backups/ (automatic backups)
+#   - logs/ (troubleshooting)
+#   Backup these before major updates
+#
+# Updates:
+#   System → Updates
+#   - Install Updates Automatically: Yes (recommended)
+#   - Branch: main (stable)
+#   Container updates via Docker
+#
+# Performance:
+#   Lightweight for most setups
+#   Typical usage: 200-500 MB RAM
+#   CPU spikes during:
+#   - RSS sync (every 15 min)
+#   - Movie searches
+#   - Import operations
+#
+# Activity Monitoring:
+#   Activity → Queue: Current downloads
+#   Activity → History: Past activity
+#   System → Events: Recent events
+#   System → Tasks: Scheduled tasks
+#
+# Tasks:
+#   Key automated tasks:
+#   - RSS Sync: Every 15 minutes
+#   - Import List Sync: Every 6 hours
+#   - Refresh Movies: Every 24 hours
+#   - Search Monitored Downloads: Every 15 minutes
+#   - Update Library: After import
+#   - NetImport: Sync from lists (optional)
+#
+# Import Lists:
+#   Automatically add movies from:
+#   - TMDB Lists
+#   - Trakt Lists
+#   - IMDb Lists
+#   - Custom lists
+#   Settings → Import Lists
+#   
+#   Example: Auto-add top 250 IMDb movies
+#
+# Security:
+#   - Enable authentication (Forms or Basic)
+#   - Use strong password
+#   - Keep API key secure
+#   - Don't expose port 7878 to internet
+#   - Consider reverse proxy with SSL
+#
+# Best Practices:
+#   - Use quality profiles to control file sizes
+#   - Enable rename for consistent naming
+#   - Set realistic minimum availability
+#   - Let Prowlarr manage indexers
+#   - Regular backups of /config
+#   - Keep Radarr updated (v4+ for best features)
+#   - Use custom formats to fine-tune quality
+#   - Avoid "Announced" availability to prevent CAM quality
+#
+# TRaSH Guides:
+#   Community-maintained optimal settings:
+#   https://trash-guides.info/Radarr/
+#   - Custom format setup
+#   - Quality profiles
+#   - Naming schemes
+#   - Best practices
+#
+# 4K/HDR Movies:
+#   For 4K content:
+#   1. Create separate root folder: /movies-4k
+#   2. Create UHD-2160p quality profile
+#   3. Add custom formats for HDR/DV
+#   4. Use separate Radarr instance OR
+#   5. Use same instance with different quality profile
+#   
+#   Jellyfin can handle multiple versions:
+#   Enable "Group versions of the same movie" in Jellyfin
+#
+# Upgrade Existing Movies:
+#   Radarr can upgrade movies to better quality:
+#   Settings → Profiles → [select profile]
+#   - Upgrades Allowed: Yes
+#   - Upgrade Until: Bluray-1080p (or your preference)
+#   Radarr will search for better versions automatically
+#
+# Cut-off vs Preferred:
+#   - Cut-off: Stop searching once this quality is met
+#   - Preferred: Continue searching for better up to this
+#   Set in quality profile

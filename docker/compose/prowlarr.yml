@@ -1,0 +1,261 @@
+################################################################################
+# Prowlarr - Indexer Manager
+#
+# Prowlarr is a centralized indexer manager for Usenet and BitTorrent.
+# It manages indexers in one place and syncs them to all connected *Arr apps.
+#
+# Key Features:
+#   - Centralized indexer configuration
+#   - Automatic sync to Sonarr/Radarr/Lidarr/Readarr
+#   - Indexer health monitoring
+#   - Built-in search testing
+#   - API for automation
+#   - Support for 500+ indexers
+#
+# Network Architecture:
+#   - Runs on media-network (NOT through VPN)
+#   - Indexer queries are metadata only (not sensitive)
+#   - Communicates with Sonarr/Radarr over Docker network
+#   - Downloads happen via NZBGet (which IS through VPN)
+#
+# Documentation: https://wiki.servarr.com/prowlarr
+################################################################################
+
+services:
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    hostname: prowlarr
+    
+    # Ports exposed to host
+    ports:
+      - "${PROWLARR_PORT:-9696}:9696"
+    
+    # Environment variables
+    environment:
+      # User and Group IDs
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-100}
+      
+      # Timezone
+      - TZ=${TZ:-America/New_York}
+      
+      # Optional: Set umask for file permissions
+      - UMASK=002
+    
+    # Volumes for persistent data
+    volumes:
+      # Prowlarr configuration directory
+      # Contains config.xml, database, and logs
+      - ${CONFIG_BASE:-/opt/docker/config}/prowlarr:/config
+      
+      # Optional: Custom indexer definitions
+      # - ./prowlarr-definitions:/config/Definitions:ro
+    
+    # Networks
+    networks:
+      - media-network
+    
+    # Restart policy
+    restart: ${RESTART_POLICY:-unless-stopped}
+    
+    # Health check
+    # Verifies Prowlarr API is responding
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9696/ping", "||", "exit", "1"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    
+    # Resource limits (optional)
+    deploy:
+      resources:
+        limits:
+          memory: ${PROWLARR_MEM_LIMIT:-512m}
+        reservations:
+          memory: 128m
+    
+    # Labels for management
+    labels:
+      - "com.brothereye.service=prowlarr"
+      - "com.brothereye.description=Indexer manager for *Arr apps"
+      - "com.brothereye.group=automation"
+      - "com.brothereye.url=http://${LXC_IP}:9696"
+
+################################################################################
+# NOTES
+################################################################################
+
+# Initial Setup:
+#   1. Access web UI: http://LXC_IP:9696
+#   2. No default authentication - set up immediately!
+#   3. Go to Settings → General → Authentication
+#   4. Enable authentication and create username/password
+#   5. Copy API key from Settings → General
+#
+# Adding Indexers:
+#   1. Go to Indexers → Add Indexer
+#   2. Search for your preferred indexers:
+#      - Usenet: NZBgeek, NZBFinder, DrunkenSlug, etc.
+#      - Requires accounts on these sites
+#   3. Enter indexer credentials/API keys
+#   4. Test each indexer
+#   5. Save
+#
+# Connecting to Apps:
+#   Settings → Apps → Add Application
+#   
+#   For Sonarr:
+#   - Name: Sonarr
+#   - Sync Level: Full Sync
+#   - Prowlarr Server: http://prowlarr:9696
+#   - Sonarr Server: http://sonarr:8989
+#   - API Key: (from Sonarr Settings → General)
+#   
+#   For Radarr:
+#   - Name: Radarr
+#   - Sync Level: Full Sync
+#   - Prowlarr Server: http://prowlarr:9696
+#   - Radarr Server: http://radarr:7878
+#   - API Key: (from Radarr Settings → General)
+#
+# Download Client:
+#   Settings → Download Clients → Add
+#   - Type: NZBGet
+#   - Name: NZBGet
+#   - Host: gluetun (important - use gluetun, not nzbget!)
+#   - Port: 6789
+#   - Username: (your NZBGet username)
+#   - Password: (your NZBGet password)
+#   - Category: (leave blank or set default)
+#   - Test and Save
+#
+# Sync Categories:
+#   Prowlarr automatically creates categories in connected apps
+#   TV shows → Sonarr
+#   Movies → Radarr
+#   This happens automatically when syncing
+#
+# Indexer Priority:
+#   Prowlarr tests each indexer and ranks by reliability
+#   You can manually set priority in indexer settings
+#   Higher priority indexers are queried first
+#
+# Search Testing:
+#   Use the Search tab to test indexers
+#   Example: Search "Big Buck Bunny" to verify indexers work
+#   Check results from multiple indexers
+#   Verify download links are generated correctly
+#
+# Why Not Through VPN?
+#   Indexer searches are metadata queries (not downloads)
+#   They reveal what you're searching for, not what you're downloading
+#   Actual downloads happen via NZBGet through VPN
+#   Running Prowlarr through VPN can cause:
+#   - Slower searches (extra latency)
+#   - Indexer blocks (some don't like VPN IPs)
+#   - Connection issues
+#
+# API Access:
+#   Other services access Prowlarr at:
+#   - Internal: http://prowlarr:9696
+#   - External: http://LXC_IP:9696
+#   - API endpoint: http://prowlarr:9696/api/v1
+#   - API Key: Found in Settings → General
+#
+# Indexer Health:
+#   Prowlarr monitors indexer health automatically
+#   Failed indexers show warnings
+#   Check: System → Status for issues
+#   Disable broken indexers temporarily
+#
+# Sync vs Manual:
+#   Full Sync: Prowlarr manages all indexers in target app
+#   Partial Sync: Manual indexers allowed in target app
+#   Recommendation: Use Full Sync for consistency
+#
+# Popular Usenet Indexers:
+#   Free:
+#   - NZBgeek (limited daily API calls)
+#   - NZBFinder (limited searches)
+#   
+#   Paid (Recommended for reliability):
+#   - NZBgeek VIP ($12/year)
+#   - DrunkenSlug ($10-20/year)
+#   - NZB.su ($10/year)
+#   - NinjaCentral ($10/year)
+#   
+#   Note: Most require registration even for free tiers
+#
+# Indexer Configuration:
+#   Each indexer needs:
+#   - URL (usually provided by indexer)
+#   - API Key (from indexer account page)
+#   - Categories (which content types to search)
+#   - Optional: VIP/priority settings
+#
+# Troubleshooting:
+#   1. Check logs: docker compose logs prowlarr
+#   2. System → Logs in web UI
+#   3. Test individual indexers
+#   4. Verify API keys are correct
+#   5. Check network connectivity
+#   6. Ensure connected apps can reach Prowlarr
+#
+# Testing Connectivity:
+#   From Sonarr/Radarr container:
+#   docker compose exec sonarr curl http://prowlarr:9696/ping
+#   Should return: {"status":"OK"}
+#
+# Backup:
+#   Important files in /config:
+#   - config.xml (main configuration)
+#   - prowlarr.db (database with indexers and settings)
+#   - logs/ (troubleshooting)
+#   Backup these regularly
+#
+# Updates:
+#   Prowlarr auto-updates its indexer definitions
+#   Container image updates via Docker
+#   Check Settings → General → Updates for application updates
+#
+# Security:
+#   - Enable authentication (Forms or Basic)
+#   - Use strong password
+#   - Don't expose port 9696 to internet
+#   - Keep API key secure
+#   - Consider using Caddy reverse proxy with SSL
+#
+# Advanced Features:
+#   - Custom filters per app
+#   - Indexer-specific settings
+#   - Fallback indexers
+#   - Automatic indexer discovery
+#   - Statistics and history
+#
+# Integration Flow:
+#   1. User requests content in Jellyseerr
+#   2. Jellyseerr tells Sonarr/Radarr to monitor it
+#   3. Sonarr/Radarr asks Prowlarr to search indexers
+#   4. Prowlarr queries all configured indexers
+#   5. Results returned to Sonarr/Radarr
+#   6. Best release selected and sent to NZBGet
+#   7. NZBGet downloads via VPN
+#   8. Sonarr/Radarr imports completed download
+#   9. Jellyfin detects new media
+#
+# Performance:
+#   Prowlarr is lightweight
+#   Typical usage: < 100MB RAM, < 1% CPU
+#   Searches are fast (parallel queries)
+#   No heavy processing needed
+#
+# Categories:
+#   Prowlarr supports:
+#   - Movies (2000-2090)
+#   - TV (5000-5090)
+#   - Music (3000-3090)
+#   - Books (7000-7090)
+#   - XXX (6000-6090)
+#   Automatically mapped to correct apps

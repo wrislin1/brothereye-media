@@ -1,0 +1,173 @@
+################################################################################
+# Brother Eye Media Stack - Main Docker Compose File
+#
+# This file orchestrates all services using the modular 'include' directive.
+# Each service is defined in its own file under compose/*.yml for easy management.
+#
+# Architecture:
+#   - Gluetun: VPN container (all downloads route through this)
+#   - NZBGet: Usenet downloader (shares Gluetun's network)
+#   - Prowlarr: Indexer manager (connects to Sonarr/Radarr)
+#   - Sonarr: TV show automation
+#   - Radarr: Movie automation
+#   - Bazarr: Subtitle management
+#   - Jellyfin: Media server
+#   - Jellyseerr: Request management
+#   - Caddy: Reverse proxy (optional)
+#
+# Usage:
+#   docker compose up -d              # Start all services
+#   docker compose down               # Stop all services
+#   docker compose logs -f [service]  # View logs
+#   docker compose restart [service]  # Restart specific service
+#
+# Environment Variables:
+#   Load from .env file (symlinked to secrets/.env.production)
+#
+################################################################################
+
+version: "3.9"
+
+################################################################################
+# Include Service Definitions
+################################################################################
+
+include:
+  # VPN layer - must be first as NZBGet depends on it
+  - compose/gluetun.yml
+  
+  # Download stack - uses VPN
+  - compose/nzbget.yml
+  
+  # Indexer management
+  - compose/prowlarr.yml
+  
+  # Content automation
+  - compose/sonarr.yml
+  - compose/radarr.yml
+  - compose/bazarr.yml
+  
+  # Media server
+  - compose/jellyfin.yml
+  
+  # Request management
+  - compose/jellyseerr.yml
+  
+  # Reverse proxy (optional - comment out if not needed)
+  - compose/caddy.yml
+
+################################################################################
+# Shared Networks
+################################################################################
+
+networks:
+  # Main network for inter-service communication
+  media-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+  
+  # VPN network (Gluetun provides this, NZBGet uses it)
+  # No explicit definition needed - created by Gluetun service
+
+################################################################################
+# Shared Volumes (if needed)
+################################################################################
+
+# Note: Most volumes are defined as bind mounts in individual service files
+# for better clarity and control. This section can be used for named volumes
+# if you want Docker to manage them instead of bind mounts.
+
+# volumes:
+#   jellyfin-config:
+#   sonarr-config:
+#   radarr-config:
+#   prowlarr-config:
+#   nzbget-config:
+#   bazarr-config:
+#   jellyseerr-config:
+#   caddy-data:
+#   caddy-config:
+
+################################################################################
+# Service Defaults (optional)
+################################################################################
+
+# Define default settings that apply to all services
+# These can be overridden in individual service files
+
+x-common-variables: &common-variables
+  TZ: ${TZ:-America/New_York}
+  PUID: ${PUID:-1000}
+  PGID: ${PGID:-100}
+
+x-restart-policy: &restart-policy
+  restart: unless-stopped
+
+################################################################################
+# Notes
+################################################################################
+
+# Service Start Order:
+#   1. Gluetun (VPN) starts first
+#   2. NZBGet starts after Gluetun (depends_on: gluetun)
+#   3. All other services start in parallel
+#
+# Network Architecture:
+#   - Gluetun creates VPN tunnel
+#   - NZBGet uses: network_mode: service:gluetun
+#   - All other services use media-network
+#   - Prowlarr/Sonarr/Radarr communicate over media-network
+#   - Jellyfin serves content over media-network
+#
+# Storage Mounts:
+#   - /mnt/media: NFS mount from NAS (read-only for most services)
+#   - /opt/docker/config/*: Service configurations
+#   - /mnt/media/downloads: NZBGet download directory
+#   - /mnt/media/Movies: Radarr manages this
+#   - /mnt/media/TV: Sonarr manages this
+#
+# Accessing Services:
+#   - Jellyfin: http://LXC_IP:8096
+#   - NZBGet: http://LXC_IP:6789 (proxied through Gluetun)
+#   - Prowlarr: http://LXC_IP:9696
+#   - Sonarr: http://LXC_IP:8989
+#   - Radarr: http://LXC_IP:7878
+#   - Bazarr: http://LXC_IP:6767
+#   - Jellyseerr: http://LXC_IP:5055
+#   - Caddy: http://LXC_IP:80 / https://LXC_IP:443
+#
+# Port Conflicts:
+#   Ensure these ports are not in use on the host:
+#   8096, 6789, 9696, 8989, 7878, 6767, 5055, 80, 443, 8000
+#
+# GPU Passthrough (Jellyfin):
+#   Requires /dev/dri devices passed to LXC
+#   See: proxmox/pass-gpu-to-lxc.sh
+#
+# VPN Kill-Switch:
+#   Built into Gluetun - if VPN drops, NZBGet cannot connect
+#   Monitor VPN status: http://LXC_IP:8000
+#
+# Health Checks:
+#   Most services have built-in health checks
+#   Use: docker compose ps to view health status
+#   Use: scripts/health-check.sh for detailed checks
+#
+# Updating Services:
+#   docker compose pull        # Pull latest images
+#   docker compose up -d       # Recreate updated containers
+#   Or use: ./manage-stack.sh and select "Update all containers"
+#
+# Logs:
+#   docker compose logs -f [service]
+#   Logs are limited to 50MB per service (3 files) via Docker daemon config
+#
+# Troubleshooting:
+#   1. Check container status: docker compose ps
+#   2. View logs: docker compose logs [service]
+#   3. Verify VPN: docker compose exec gluetun wget -qO- ifconfig.me
+#   4. Test connectivity: docker compose exec sonarr ping prowlarr
+#   5. Check permissions on /mnt/media
+#   6. Ensure .env file exists and has correct values

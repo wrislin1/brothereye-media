@@ -1,0 +1,178 @@
+---
+# ============================================================================
+# Bazarr - Subtitle Management Service
+# ============================================================================
+# Part of Brother Eye Media Stack
+# File: docker/compose/bazarr.yml
+#
+# Purpose:
+#   - Automatically downloads subtitles for TV shows and movies
+#   - Integrates with Sonarr and Radarr to sync media library
+#   - Supports multiple subtitle providers (OpenSubtitles, Subscene, etc.)
+#   - Can download subtitles in multiple languages
+#   - Automatically matches and syncs subtitles with media files
+#
+# Access:
+#   - Web UI: http://<host-ip>:6767
+#   - Default credentials: None (set up on first access)
+#
+# Integration:
+#   - Connects to Sonarr at http://sonarr:8989
+#   - Connects to Radarr at http://radarr:7878
+#   - Reads/writes subtitle files to /mnt/media/TV and /mnt/media/Movies
+#
+# Configuration:
+#   - Config stored in /opt/docker/config/bazarr
+#   - Subtitle preferences set via web UI
+#   - API keys for subtitle providers configured in settings
+# ============================================================================
+
+services:
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr
+    hostname: bazarr
+    restart: unless-stopped
+
+    # ========================================================================
+    # Network Configuration
+    # ========================================================================
+    networks:
+      - media-network
+    ports:
+      - "6767:6767"  # Web UI
+
+    # ========================================================================
+    # Environment Variables
+    # ========================================================================
+    environment:
+      - PUID=${PUID}        # User ID (default: 1000)
+      - PGID=${PGID}        # Group ID (default: 100)
+      - TZ=${TZ}            # Timezone
+      - UMASK=002           # File creation mask (group writable)
+
+    # ========================================================================
+    # Volume Mappings
+    # ========================================================================
+    volumes:
+      # Configuration directory
+      - ${CONFIG_ROOT}/bazarr:/config
+
+      # Media directories (read/write for subtitle placement)
+      - ${MEDIA_ROOT}/TV:/tv
+      - ${MEDIA_ROOT}/Movies:/movies
+
+    # ========================================================================
+    # Resource Limits (Optional)
+    # ========================================================================
+    # Uncomment to limit resources if needed
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '1.0'
+    #       memory: 512M
+    #     reservations:
+    #       memory: 256M
+
+    # ========================================================================
+    # Labels
+    # ========================================================================
+    labels:
+      - "com.brothereye.service=bazarr"
+      - "com.brothereye.description=Subtitle management for Sonarr and Radarr"
+      - "com.brothereye.port=6767"
+
+    # ========================================================================
+    # Health Check
+    # ========================================================================
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6767/system/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+# ============================================================================
+# Network Definition
+# ============================================================================
+# Uses external network defined in main docker-compose.yml
+networks:
+  media-network:
+    external: true
+
+# ============================================================================
+# Configuration Notes
+# ============================================================================
+#
+# FIRST-TIME SETUP:
+# 1. Access Bazarr at http://<host-ip>:6767
+# 2. Go to Settings → Sonarr
+#    - Add Sonarr server: http://sonarr:8989
+#    - Get API key from Sonarr's Settings → General
+# 3. Go to Settings → Radarr
+#    - Add Radarr server: http://radarr:7878
+#    - Get API key from Radarr's Settings → General
+# 4. Go to Settings → Providers
+#    - Add subtitle providers (OpenSubtitles, etc.)
+#    - Configure API keys/credentials for each provider
+# 5. Go to Settings → Languages
+#    - Add languages you want to download
+#    - Set language profiles (e.g., English, Spanish)
+# 6. Enable automatic subtitle download in Settings → Subtitle
+#
+# SUBTITLE PROVIDERS:
+# - OpenSubtitles.com (requires free account)
+# - OpenSubtitles.org (legacy, may require VIP)
+# - Subscene (no account needed)
+# - Podnapisi (no account needed)
+# - TVSubtitles (no account needed)
+# - Addic7ed (requires account)
+#
+# LANGUAGE CONFIGURATION:
+# - Set language profiles for different quality tiers
+# - Configure minimum score thresholds
+# - Enable hearing impaired (SDH) subtitles if desired
+# - Set up language equality (e.g., en = eng = English)
+#
+# SYNC SETTINGS:
+# - Disk scan frequency (check for new media)
+# - Upgrade previously downloaded subtitles
+# - Manual search vs automatic
+# - Missing subtitle search frequency
+#
+# ANTI-CAPTCHA:
+# - Some providers (OpenSubtitles) may require solving captchas
+# - Consider using anti-captcha services if automation breaks
+# - Or use multiple providers to spread load
+#
+# PERFORMANCE:
+# - Bazarr can be resource-light during idle
+# - Subtitle downloads are small (KB to few MB)
+# - Initial library scan may take time on large collections
+# - Limit concurrent downloads in settings if needed
+#
+# TROUBLESHOOTING:
+# - Check logs in /opt/docker/config/bazarr/log
+# - Verify Sonarr/Radarr API connectivity
+# - Ensure subtitle provider credentials are valid
+# - Check file permissions on media directories
+# - Verify network connectivity: docker exec bazarr ping sonarr
+#
+# BACKUP:
+# - Config directory: /opt/docker/config/bazarr
+# - Contains database, settings, and logs
+# - Backup before major updates
+# - Can be restored by copying back to same location
+#
+# UPDATES:
+# - LinuxServer.io provides regular updates
+# - Bazarr auto-checks for updates (can enable auto-update in UI)
+# - Or use Docker image updates: docker-compose pull bazarr
+#
+# SECURITY:
+# - No authentication by default (relies on network isolation)
+# - Can enable authentication in Settings → General
+# - Consider putting behind reverse proxy with auth
+# - API key is generated automatically (Settings → General)
+#
+# ============================================================================

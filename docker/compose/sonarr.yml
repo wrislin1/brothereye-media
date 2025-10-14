@@ -1,0 +1,331 @@
+################################################################################
+# Sonarr - TV Show Automation
+#
+# Sonarr automates TV show downloading, organization, and library management.
+# It monitors RSS feeds, searches for episodes, and sends them to NZBGet.
+#
+# Key Features:
+#   - Automatic episode monitoring
+#   - Quality profiles and custom formats (.NET 6 / v4+)
+#   - Calendar and upcoming episodes
+#   - Automatic episode renaming
+#   - Series organization
+#   - API for external integrations (Jellyseerr)
+#
+# Network Architecture:
+#   - Runs on media-network (NOT through VPN)
+#   - Queries Prowlarr for indexers
+#   - Sends downloads to NZBGet (via gluetun hostname)
+#   - Manages /mnt/media/TV directory
+#   - Integrates with Jellyfin via library path
+#
+# Documentation: https://wiki.servarr.com/sonarr
+################################################################################
+
+services:
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    hostname: sonarr
+    
+    # Ports exposed to host
+    ports:
+      - "${SONARR_PORT:-8989}:8989"
+    
+    # Environment variables
+    environment:
+      # User and Group IDs (must match NAS permissions)
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-100}
+      
+      # Timezone
+      - TZ=${TZ:-America/New_York}
+      
+      # Optional: Set umask for file permissions
+      - UMASK=002
+    
+    # Volumes for persistent data
+    volumes:
+      # Sonarr configuration directory
+      # Contains config.xml, database, and logs
+      - ${CONFIG_BASE:-/opt/docker/config}/sonarr:/config
+      
+      # TV library directory (where Sonarr manages shows)
+      - ${TV_DIR:-/mnt/media/TV}:/tv
+      
+      # Download directory (where NZBGet places completed downloads)
+      # Sonarr imports from here and moves to /tv
+      - ${DOWNLOADS_DIR:-/mnt/media/downloads}:/downloads
+      
+      # Optional: Additional paths for library organization
+      # - ${ANIME_DIR:-/mnt/media/Anime}:/anime
+    
+    # Networks
+    networks:
+      - media-network
+    
+    # Restart policy
+    restart: ${RESTART_POLICY:-unless-stopped}
+    
+    # Health check
+    # Verifies Sonarr API is responding
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8989/ping", "||", "exit", "1"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    
+    # Resource limits (optional)
+    deploy:
+      resources:
+        limits:
+          memory: ${SONARR_MEM_LIMIT:-1g}
+        reservations:
+          memory: 256m
+    
+    # Labels for management
+    labels:
+      - "com.brothereye.service=sonarr"
+      - "com.brothereye.description=TV show automation and management"
+      - "com.brothereye.group=automation"
+      - "com.brothereye.url=http://${LXC_IP}:8989"
+
+################################################################################
+# NOTES
+################################################################################
+
+# Initial Setup:
+#   1. Access web UI: http://LXC_IP:8989
+#   2. Settings → Media Management:
+#      - Enable "Rename Episodes"
+#      - Episode format: {Series Title} - S{season:00}E{episode:00} - {Episode Title}
+#      - Season folder format: Season {season:00}
+#      - Create empty series folders: Yes
+#      - Delete empty folders: Yes
+#   3. Settings → Profiles → Quality Profiles:
+#      - Create or modify profiles (HD-1080p, HD-720p/1080p, etc.)
+#   4. Settings → General:
+#      - Authentication: Forms (Recommended)
+#      - Copy API Key for later use
+#
+# Connecting to Prowlarr:
+#   This is automatic if Prowlarr is configured correctly!
+#   Prowlarr will push indexers to Sonarr automatically.
+#   
+#   Verify in: Settings → Indexers
+#   You should see indexers synced from Prowlarr
+#
+# Connecting to NZBGet:
+#   Settings → Download Clients → Add → NZBGet
+#   - Name: NZBGet
+#   - Host: gluetun (IMPORTANT: use gluetun, not nzbget!)
+#   - Port: 6789
+#   - Username: (your NZBGet username)
+#   - Password: (your NZBGet password)
+#   - Category: tv
+#   - Use SSL: No (internal network)
+#   - Test and Save
+#
+# Adding TV Shows:
+#   1. Series → Add New
+#   2. Search for show name
+#   3. Select correct series
+#   4. Root folder: /tv
+#   5. Quality Profile: HD-1080p (or your preference)
+#   6. Monitor: All Episodes (or specific seasons)
+#   7. Season folder: Yes
+#   8. Add Series
+#
+# Quality Profiles (Sonarr v4):
+#   Settings → Profiles → Quality Profiles
+#   Example HD-1080p profile:
+#   - WEBDL-1080p (preferred)
+#   - WEBRip-1080p
+#   - Bluray-1080p
+#   - HDTV-1080p
+#   
+#   Custom Formats (advanced):
+#   - Prefer releases with certain keywords
+#   - Avoid releases with others
+#   - See TRaSH Guides for optimal setups
+#
+# Monitoring:
+#   Activity → Queue: Active downloads
+#   Calendar: Upcoming episodes
+#   System → Status: System health
+#   System → Tasks: Automated tasks
+#
+# Automatic Search:
+#   Sonarr automatically searches for monitored episodes
+#   Runs on schedule (configurable in System → Tasks)
+#   Also triggers when:
+#   - New series added
+#   - New season announced
+#   - Episode becomes available (RSS)
+#
+# Manual Search:
+#   Series → [select series] → [season/episode]
+#   Click magnifying glass icon
+#   Choose from available releases
+#   Click download icon to grab
+#
+# Import Existing Library:
+#   If you already have TV shows:
+#   1. Place them in /tv following structure:
+#      /tv/Show Name/Season 01/Show Name - S01E01.mkv
+#   2. Series → Import Library
+#   3. Select /tv
+#   4. Map shows to TVDB entries
+#   5. Import
+#
+# Episode Naming:
+#   Sonarr renames episodes automatically
+#   Default format: Show Name - S01E01 - Episode Title
+#   Customize in: Settings → Media Management → Episode Naming
+#   
+#   Examples:
+#   - {Series Title} - S{season:00}E{episode:00} - {Episode Title}
+#   - {Series TitleYear} - S{season:00}E{episode:00} - {Episode Title} [{Quality Full}]
+#
+# Integration with Jellyfin:
+#   Sonarr organizes TV shows in /tv
+#   Jellyfin scans /tv for content
+#   Sonarr can notify Jellyfin of new content:
+#   Settings → Connect → Add → Emby/Jellyfin
+#   - Host: http://jellyfin:8096
+#   - API Key: (from Jellyfin)
+#   - Update Library: Yes
+#
+# Integration with Jellyseerr:
+#   Jellyseerr connects to Sonarr:
+#   - Sonarr URL: http://sonarr:8989
+#   - API Key: (from Sonarr Settings → General)
+#   Users request shows in Jellyseerr
+#   Jellyseerr adds them to Sonarr automatically
+#   Sonarr searches and downloads
+#
+# Root Folders:
+#   /tv - Primary TV library
+#   Can add multiple root folders:
+#   - /tv - Regular shows
+#   - /anime - Anime (if you want separation)
+#   Settings → Media Management → Root Folders
+#
+# Quality Definitions:
+#   Settings → Quality → Quality Definitions
+#   Set min/max file sizes per quality
+#   Prevents downloading tiny or huge files
+#   
+#   Example for 1080p 45-min episode:
+#   - Min: 1500 MB
+#   - Preferred: 3000 MB
+#   - Max: 6000 MB
+#
+# Custom Formats (v4 Feature):
+#   Settings → Profiles → Custom Formats
+#   Examples:
+#   - Prefer x265 (smaller file size)
+#   - Avoid hardcoded subs
+#   - Prefer proper/repack
+#   - Require specific groups
+#   
+#   See: https://trash-guides.info/Sonarr/
+#
+# Download Client Categories:
+#   NZBGet categories help organize downloads
+#   Sonarr sends to "tv" category
+#   NZBGet processes and places in /downloads/tv
+#   Sonarr imports from /downloads/tv to /tv
+#
+# Series Types:
+#   - Standard: Most shows (e.g., Breaking Bad)
+#   - Daily: News, talk shows (date-based)
+#   - Anime: Different naming conventions
+#   Set when adding series
+#
+# Failed Download Handling:
+#   Settings → Download Clients → Failed Download Handling
+#   - Redownload: Yes (automatic retry)
+#   - Remove: Yes (clean up failed)
+#   Sonarr automatically grabs alternative release
+#
+# Troubleshooting:
+#   1. Check logs: docker compose logs sonarr
+#   2. System → Logs in web UI
+#   3. System → Status for warnings
+#   4. Test download client connection
+#   5. Test indexer searches
+#   6. Verify permissions on /tv directory (1000:100)
+#   7. Check Prowlarr sync status
+#
+# Common Issues:
+#   - "No indexers available": Connect Prowlarr
+#   - "Download client unavailable": Check Gluetun is running
+#   - "Import failed": Check file permissions
+#   - "Series not found": Check TVDB for correct name
+#
+# API Access:
+#   External tools use:
+#   - URL: http://sonarr:8989 (internal) or http://LXC_IP:8989 (external)
+#   - API Key: Settings → General
+#   - Endpoints: /api/v3/*
+#
+# Backup:
+#   Important files in /config:
+#   - config.xml (main configuration)
+#   - sonarr.db (database with series and settings)
+#   - Backups/ (automatic backups)
+#   - logs/ (troubleshooting)
+#   Backup these before major updates
+#
+# Updates:
+#   System → Updates
+#   - Install Updates Automatically: Yes (recommended)
+#   - Branch: main (stable)
+#   Container updates via Docker
+#
+# Performance:
+#   Lightweight for most setups
+#   Typical usage: 200-500 MB RAM
+#   CPU spikes during:
+#   - RSS sync (every 15 min)
+#   - Episode searches
+#   - Import operations
+#
+# Activity Monitoring:
+#   Activity → Queue: Current downloads
+#   Activity → History: Past activity
+#   System → Events: Recent events
+#   System → Tasks: Scheduled tasks
+#
+# Tasks:
+#   Key automated tasks:
+#   - RSS Sync: Every 15 minutes
+#   - Import List Sync: Every 6 hours
+#   - Refresh Series: Every 12 hours
+#   - Search Monitored Downloads: Every 15 minutes
+#   - Update Library: After import
+#
+# Security:
+#   - Enable authentication (Forms or Basic)
+#   - Use strong password
+#   - Keep API key secure
+#   - Don't expose port 8989 to internet
+#   - Consider reverse proxy with SSL
+#
+# Best Practices:
+#   - Use quality profiles to control file sizes
+#   - Enable rename for consistent naming
+#   - Monitor only what you watch (saves searches)
+#   - Let Prowlarr manage indexers
+#   - Regular backups of /config
+#   - Keep Sonarr updated (v4+ for best features)
+#
+# TRaSH Guides:
+#   Community-maintained optimal settings:
+#   https://trash-guides.info/Sonarr/
+#   - Custom format setup
+#   - Quality profiles
+#   - Naming schemes
+#   - Best practices

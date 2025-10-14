@@ -1,0 +1,310 @@
+---
+# ============================================================================
+# Jellyfin - Media Server with Hardware Transcoding
+# ============================================================================
+# Part of Brother Eye Media Stack
+# File: docker/compose/jellyfin.yml
+#
+# Purpose:
+#   - Stream movies, TV shows, music, and photos to any device
+#   - Organize and manage media library with rich metadata
+#   - Hardware-accelerated transcoding via VAAPI (Intel/AMD GPU)
+#   - Multi-user support with individual profiles and watch history
+#   - Live TV and DVR support (if configured)
+#
+# Access:
+#   - Web UI (HTTP): http://<host-ip>:8096
+#   - Web UI (HTTPS): https://<host-ip>:8920
+#   - Mobile apps: Available for iOS, Android, etc.
+#   - Smart TV apps: Available for Roku, Fire TV, Android TV, etc.
+#
+# Hardware Transcoding:
+#   - Requires GPU passthrough for VAAPI acceleration
+#   - Both /dev/dri/card1 and /dev/dri/renderD128 must be passed
+#   - Dramatically reduces CPU usage during transcoding
+#   - Supports H.264, H.265 (HEVC), VP9, and more
+#
+# Integration:
+#   - Integrates with Sonarr/Radarr via webhooks (optional)
+#   - Can be accessed by Jellyseerr for media requests
+#   - Bazarr manages subtitles for content
+# ============================================================================
+
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin
+    hostname: jellyfin
+    restart: unless-stopped
+
+    # ========================================================================
+    # Network Configuration
+    # ========================================================================
+    networks:
+      - media-network
+    ports:
+      - "8096:8096"   # HTTP web UI
+      - "8920:8920"   # HTTPS web UI (optional)
+      - "7359:7359/udp"  # Service discovery (optional)
+      - "1900:1900/udp"  # DLNA discovery (optional)
+
+    # ========================================================================
+    # Environment Variables
+    # ========================================================================
+    environment:
+      - PUID=${PUID}        # User ID (default: 1000)
+      - PGID=${PGID}        # Group ID (default: 100)
+      - TZ=${TZ}            # Timezone
+      - JELLYFIN_PublishedServerUrl=${JELLYFIN_URL:-http://localhost:8096}  # Public URL
+
+    # ========================================================================
+    # Volume Mappings
+    # ========================================================================
+    volumes:
+      # Configuration and data
+      - ${CONFIG_ROOT}/jellyfin/config:/config
+      - ${CONFIG_ROOT}/jellyfin/cache:/cache
+
+      # Media libraries (read-only recommended)
+      - ${MEDIA_ROOT}/Movies:/data/movies:ro
+      - ${MEDIA_ROOT}/TV:/data/tv:ro
+      
+      # Optional: Additional media directories
+      # - ${MEDIA_ROOT}/Music:/data/music:ro
+      # - ${MEDIA_ROOT}/Photos:/data/photos:ro
+
+    # ========================================================================
+    # GPU Passthrough for Hardware Transcoding
+    # ========================================================================
+    # CRITICAL: Both devices must be passed for VAAPI to work properly
+    devices:
+      - /dev/dri/renderD128:/dev/dri/renderD128  # GPU render node
+      - /dev/dri/card1:/dev/dri/card1            # GPU card device
+    
+    # Grant access to video group (usually GID 44 or 107)
+    # This allows Jellyfin to use the GPU devices
+    group_add:
+      - "44"   # video group (may need to adjust - check with: getent group video)
+      # - "107"  # Alternative video group ID - uncomment if 44 doesn't work
+
+    # ========================================================================
+    # Resource Limits (Optional)
+    # ========================================================================
+    # Uncomment to limit resources
+    # Note: Hardware transcoding uses minimal CPU, but allocate enough memory
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '4.0'
+    #       memory: 4G
+    #     reservations:
+    #       memory: 2G
+
+    # ========================================================================
+    # Labels
+    # ========================================================================
+    labels:
+      - "com.brothereye.service=jellyfin"
+      - "com.brothereye.description=Media server with hardware transcoding"
+      - "com.brothereye.port=8096"
+      - "com.brothereye.url=http://localhost:8096"
+
+    # ========================================================================
+    # Health Check
+    # ========================================================================
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8096/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+# ============================================================================
+# Network Definition
+# ============================================================================
+# Uses external network defined in main docker-compose.yml
+networks:
+  media-network:
+    external: true
+
+# ============================================================================
+# Configuration Notes
+# ============================================================================
+#
+# FIRST-TIME SETUP:
+# 1. Access Jellyfin at http://<host-ip>:8096
+# 2. Create administrator account
+# 3. Add media libraries:
+#    - Movies: /data/movies
+#    - TV Shows: /data/tv
+# 4. Configure library metadata preferences
+# 5. Enable hardware acceleration (see below)
+# 6. Configure user accounts and permissions
+#
+# HARDWARE TRANSCODING SETUP:
+# 1. Navigate to Dashboard → Playback
+# 2. Scroll to "Hardware acceleration" section
+# 3. Select "Video Acceleration API (VAAPI)"
+# 4. In "VA-API Device" field, enter: /dev/dri/renderD128
+# 5. Enable these codecs for hardware decoding:
+#    ✓ H.264
+#    ✓ HEVC (H.265)
+#    ✓ VP9
+#    ✓ MPEG2
+# 6. Enable these codecs for hardware encoding:
+#    ✓ H.264
+#    ✓ HEVC (H.265)
+# 7. Set encoding preset to "auto" or "fast"
+# 8. Enable "Enable hardware encoding"
+# 9. Save and restart Jellyfin
+#
+# VERIFYING GPU ACCESS:
+# From host machine, check that GPU devices exist:
+#   ls -l /dev/dri/
+# Should show: card0, card1, renderD128, renderD129 (or similar)
+#
+# Check video group ID:
+#   getent group video
+# Should show: video:x:44: (or similar number)
+#
+# From inside container:
+#   docker exec jellyfin ls -l /dev/dri/
+# Should show the passed devices with proper permissions
+#
+# Test VAAPI functionality:
+#   docker exec jellyfin vainfo
+# Should show supported codecs and profiles
+#
+# MONITORING TRANSCODING:
+# - Dashboard → Activity shows active streams
+# - Check "Playback Info" on client to see codec info
+# - Watch CPU usage - should stay low with HW transcoding
+# - Check logs: /opt/docker/config/jellyfin/config/log/
+#
+# NETWORK CONFIGURATION:
+# - Port 8096: Primary web interface (HTTP)
+# - Port 8920: HTTPS interface (requires certificate setup)
+# - Port 7359: Service discovery for clients
+# - Port 1900: DLNA/UPnP discovery
+# - Disable discovery ports if not needed for security
+#
+# LIBRARY ORGANIZATION:
+# Movies should follow this structure:
+#   /data/movies/Movie Name (Year)/Movie Name (Year).mkv
+#
+# TV Shows should follow this structure:
+#   /data/tv/Show Name/Season 01/Show Name - S01E01 - Episode.mkv
+#
+# Sonarr and Radarr automatically organize files this way
+#
+# METADATA & ARTWORK:
+# - Jellyfin auto-downloads from TheMovieDB, TheTVDB, etc.
+# - Can manually edit metadata via web UI
+# - Chapter images extracted automatically (if enabled)
+# - Intro detection for TV shows (if enabled)
+#
+# TRANSCODING PROFILES:
+# - Default profiles work for most devices
+# - Customize in Dashboard → Playback → Transcoding
+# - Consider creating profiles for specific clients
+# - Direct Play (no transcoding) is always preferred
+#
+# SUBTITLES:
+# - Jellyfin reads embedded subtitles from media files
+# - Also reads external .srt files (Bazarr places these)
+# - Configure subtitle preferences per user
+# - Can burn-in subtitles during transcode (CPU intensive)
+# - Hardware subtitle burn-in not supported by VAAPI
+#
+# REMOTE ACCESS:
+# - Use reverse proxy (Caddy/Traefik) for HTTPS
+# - Or use VPN (WireGuard) to access securely
+# - Do NOT expose port 8096 directly to internet
+# - Configure "Published Server URL" for remote access
+#
+# USERS & PERMISSIONS:
+# - Create separate users for family/friends
+# - Set library access per user
+# - Enable/disable features per user
+# - Configure parental controls if needed
+# - Users can have separate watch history
+#
+# LIVE TV & DVR (OPTIONAL):
+# - Requires TV tuner hardware
+# - Supports HDHomeRun, M3U playlists, IPTV
+# - Can record shows to library
+# - Setup in Dashboard → Live TV
+#
+# PLUGINS:
+# - Install via Dashboard → Plugins → Catalog
+# - Popular: TMDb, TheTVDB, Trakt, Fanart
+# - Playback Reporting: Track watch statistics
+# - Intro Skipper: Auto-skip TV intros
+# - Keep plugins minimal for stability
+#
+# INTEGRATION WITH OTHER SERVICES:
+# - Sonarr/Radarr can notify Jellyfin of new content
+# - Configure webhooks in Sonarr/Radarr Settings → Connect
+# - Use Jellyfin webhook: http://jellyfin:8096/library/refresh
+# - Jellyseerr connects to Jellyfin for user requests
+#
+# PERFORMANCE OPTIMIZATION:
+# - Enable hardware transcoding (critical)
+# - Disable unused libraries and features
+# - Schedule library scans during off-hours
+# - Use SSD for transcode cache (already configured)
+# - Limit simultaneous transcodes if needed
+# - Consider separate cache drive for temp transcode files
+#
+# BACKUP STRATEGY:
+# - Config directory: /opt/docker/config/jellyfin/config
+# - Contains database, user data, watch history
+# - Cache directory can be excluded from backups
+# - Backup before major version updates
+# - Export users and settings via web UI backup
+#
+# TROUBLESHOOTING:
+# - Check logs: /opt/docker/config/jellyfin/config/log/
+# - GPU not working: Verify devices passed and group_add
+# - Playback issues: Check codec compatibility
+# - Network issues: Verify firewall rules
+# - High CPU: Ensure hardware transcoding is enabled
+# - Database corruption: Restore from backup
+#
+# SECURITY CONSIDERATIONS:
+# - Require authentication (enabled by default)
+# - Use strong administrator password
+# - Enable 2FA via plugin if available
+# - Keep Jellyfin updated regularly
+# - Use HTTPS for remote access
+# - Don't expose to internet without protection
+# - Consider putting behind reverse proxy with auth
+#
+# UPDATES:
+# - Jellyfin updates frequently (every few months)
+# - Test updates on separate instance first
+# - Backup before updating
+# - Read release notes for breaking changes
+# - Docker: docker-compose pull jellyfin && docker-compose up -d
+# - In-app updates may not work in Docker
+#
+# KNOWN ISSUES:
+# - Some devices may not support HEVC/H.265
+# - HDR tone-mapping requires recent GPU and drivers
+# - Some subtitle formats may not burn-in properly
+# - Network discovery may not work in all Docker configurations
+# - VAAPI may not support 10-bit HEVC on older GPUs
+#
+# ALTERNATIVE: If VAAPI doesn't work, try:
+# - Intel Quick Sync Video (QSV) - similar to VAAPI
+# - NVIDIA NVENC/NVDEC (if you have NVIDIA GPU)
+# - AMD VCE (if you have AMD GPU)
+# - Software transcoding (fallback, very CPU intensive)
+#
+# RESOURCES:
+# - Official docs: https://jellyfin.org/docs/
+# - Hardware acceleration: https://jellyfin.org/docs/general/administration/hardware-acceleration/
+# - Forum: https://forum.jellyfin.org/
+# - GitHub: https://github.com/jellyfin/jellyfin
+#
+# ============================================================================

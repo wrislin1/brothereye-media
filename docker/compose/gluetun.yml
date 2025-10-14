@@ -1,0 +1,195 @@
+################################################################################
+# Gluetun - VPN Container
+#
+# Gluetun is a lightweight VPN client that supports multiple providers.
+# It creates a secure tunnel and provides a kill-switch to prevent leaks.
+#
+# Key Features:
+#   - WireGuard/OpenVPN support
+#   - Built-in kill-switch (firewall blocks non-VPN traffic)
+#   - HTTP control server for status monitoring
+#   - Port forwarding support
+#   - Automatic reconnection
+#
+# Network Architecture:
+#   - NZBGet will use: network_mode: service:gluetun
+#   - This routes ALL NZBGet traffic through the VPN tunnel
+#   - Other services access NZBGet via Gluetun's exposed ports
+#
+# Documentation: https://github.com/qdm12/gluetun-wiki
+################################################################################
+
+services:
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    container_name: gluetun
+    hostname: gluetun
+    
+    # Gluetun requires elevated privileges to manage network interfaces
+    cap_add:
+      - NET_ADMIN
+    
+    # Enable IPv6 (optional)
+    # sysctls:
+    #   - net.ipv6.conf.all.disable_ipv6=0
+    
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    
+    # Ports exposed by Gluetun's network stack
+    # Note: NZBGet runs inside Gluetun's network, so we expose its port here
+    ports:
+      # Gluetun HTTP control server (status, control API)
+      - "${GLUETUN_HTTP_PORT:-8000}:8000"
+      
+      # NZBGet web UI (accessed via Gluetun's network)
+      - "${NZBGET_PORT:-6789}:6789"
+      
+      # Optional: Add other ports if running additional services through VPN
+      # - "9091:9091"  # Example: Transmission
+    
+    # Environment variables for VPN configuration
+    environment:
+      # VPN Provider (custom for self-hosted WireGuard)
+      - VPN_SERVICE_PROVIDER=${VPN_SERVICE_PROVIDER:-custom}
+      - VPN_TYPE=wireguard
+      
+      # WireGuard Configuration
+      - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
+      - WIREGUARD_ADDRESSES=${WIREGUARD_ADDRESSES}
+      - WIREGUARD_PUBLIC_KEY=${WIREGUARD_PUBLIC_KEY}
+      - WIREGUARD_ENDPOINT_IP=${WIREGUARD_ENDPOINT_IP}
+      - WIREGUARD_ENDPOINT_PORT=${WIREGUARD_ENDPOINT_PORT:-51820}
+      
+      # Optional: Allowed IPs (default: 0.0.0.0/0 routes all traffic)
+      - WIREGUARD_ALLOWED_IPS=${WIREGUARD_ALLOWED_IPS:-0.0.0.0/0}
+      
+      # Optional: Pre-shared key (if your VPN uses it)
+      # - WIREGUARD_PRESHARED_KEY=${WIREGUARD_PRESHARED_KEY}
+      
+      # DNS Configuration
+      # Use VPN endpoint's DNS (Unbound on VPS) or fallback to public DNS
+      - DNS_ADDRESS=${VPN_DNS:-1.1.1.1}
+      - DOT=off
+      
+      # Firewall (kill-switch)
+      # Blocks all non-VPN traffic automatically
+      - FIREWALL=on
+      - FIREWALL_VPN_INPUT_PORTS=${WIREGUARD_ENDPOINT_PORT:-51820}
+      
+      # Allow access to Gluetun's HTTP server from LAN
+      - FIREWALL_OUTBOUND_SUBNETS=172.20.0.0/16,192.168.0.0/16
+      
+      # Timezone
+      - TZ=${TZ:-America/New_York}
+      
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      
+      # Health check settings
+      - HEALTH_VPN_DURATION_INITIAL=30s
+      - HEALTH_VPN_DURATION_ADDITION=10s
+      - HEALTH_SUCCESS_WAIT_DURATION=5s
+      
+      # HTTP control server
+      - HTTPPROXY=off
+      - SHADOWSOCKS=off
+      - HTTP_CONTROL_SERVER_ADDRESS=:8000
+      - HTTP_CONTROL_SERVER_LOG=on
+      
+      # Optional: Port forwarding (if your VPN provider supports it)
+      # - VPN_PORT_FORWARDING=on
+      # - VPN_PORT_FORWARDING_PROVIDER=protonvpn
+      
+      # Optional: Update check
+      - UPDATER_PERIOD=24h
+    
+    # Volumes for persistent configuration
+    volumes:
+      # Gluetun config directory
+      - ${CONFIG_BASE:-/opt/docker/config}/gluetun:/gluetun
+      
+      # Optional: Custom WireGuard config file
+      # If you prefer using a wg0.conf file instead of env vars:
+      # - ./wireguard/wg0.conf:/gluetun/wireguard/wg0.conf:ro
+    
+    # Networks
+    networks:
+      - media-network
+    
+    # Restart policy
+    restart: ${RESTART_POLICY:-unless-stopped}
+    
+    # Health check
+    # Verifies VPN tunnel is active and working
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "https://1.1.1.1"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    
+    # Resource limits (optional)
+    deploy:
+      resources:
+        limits:
+          memory: ${GLUETUN_MEM_LIMIT:-512m}
+        reservations:
+          memory: 128m
+    
+    # Labels for management
+    labels:
+      - "com.brothereye.service=gluetun"
+      - "com.brothereye.description=VPN tunnel for download services"
+      - "com.brothereye.group=vpn"
+
+################################################################################
+# NOTES
+################################################################################
+
+# VPN Status:
+#   Check tunnel status: http://LXC_IP:8000
+#   API endpoints:
+#     - GET /v1/openvpn/status (OpenVPN status)
+#     - GET /v1/publicip/ip (Current public IP)
+#     - PUT /v1/openvpn/actions/restart (Restart VPN)
+#
+# Verify VPN:
+#   docker compose exec gluetun wget -qO- ifconfig.me
+#   This should show your VPS IP, not your home IP
+#
+# Kill-Switch:
+#   Built-in firewall blocks all traffic if VPN drops
+#   Test by stopping VPN: docker compose exec gluetun killall wireguard-go
+#   NZBGet should lose connectivity until VPN reconnects
+#
+# Accessing NZBGet:
+#   Since NZBGet uses Gluetun's network (network_mode: service:gluetun),
+#   access it via: http://LXC_IP:6789 (port exposed by Gluetun)
+#
+# Troubleshooting:
+#   1. Check Gluetun logs: docker compose logs gluetun
+#   2. Verify WireGuard keys are correct
+#   3. Ensure VPS endpoint is reachable
+#   4. Check firewall rules on VPS
+#   5. Verify DNS resolution works inside container
+#
+# DNS Leaks:
+#   Gluetun routes DNS through VPN automatically
+#   Test at: https://dnsleaktest.com (from inside NZBGet if possible)
+#
+# Performance:
+#   WireGuard is very efficient
+#   Minimal overhead (< 5% CPU, < 100MB RAM)
+#   Can saturate gigabit connections easily
+#
+# Custom VPN Providers:
+#   For other providers (NordVPN, Mullvad, etc.):
+#   Change VPN_SERVICE_PROVIDER and remove custom WireGuard config
+#   See: https://github.com/qdm12/gluetun-wiki/tree/main/setup/providers
+#
+# Security:
+#   - Uses ChaCha20-Poly1305 cipher (WireGuard default)
+#   - Perfect forward secrecy
+#   - No DNS/IPv6 leaks
+#   - Kill-switch prevents accidental exposure

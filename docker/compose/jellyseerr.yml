@@ -1,0 +1,383 @@
+---
+# ============================================================================
+# Jellyseerr - Media Request Management for Jellyfin
+# ============================================================================
+# Part of Brother Eye Media Stack
+# File: docker/compose/jellyseerr.yml
+#
+# Purpose:
+#   - Provides web interface for requesting movies and TV shows
+#   - Integrates with Jellyfin for user authentication and library sync
+#   - Automatically sends requests to Sonarr (TV) and Radarr (movies)
+#   - Tracks request status and notifies when content is available
+#   - Optional approval workflow for multi-user environments
+#
+# Access:
+#   - Web UI: http://<host-ip>:5055
+#   - Default admin: First Jellyfin user to log in becomes admin
+#
+# Integration:
+#   - Jellyfin: http://jellyfin:8096 (user auth and library)
+#   - Sonarr: http://sonarr:8989 (TV show requests)
+#   - Radarr: http://radarr:7878 (movie requests)
+#
+# Configuration:
+#   - All settings configured via web UI
+#   - API keys required for Jellyfin, Sonarr, and Radarr
+#   - Notification channels (Discord, Telegram, email, etc.)
+# ============================================================================
+
+services:
+  jellyseerr:
+    image: fallenbagel/jellyseerr:latest
+    container_name: jellyseerr
+    hostname: jellyseerr
+    restart: unless-stopped
+
+    # ========================================================================
+    # Network Configuration
+    # ========================================================================
+    networks:
+      - media-network
+    ports:
+      - "5055:5055"  # Web UI
+
+    # ========================================================================
+    # Environment Variables
+    # ========================================================================
+    environment:
+      - PUID=${PUID}        # User ID (default: 1000)
+      - PGID=${PGID}        # Group ID (default: 100)
+      - TZ=${TZ}            # Timezone
+      - LOG_LEVEL=info      # Logging level: debug, info, warn, error
+      - JELLYFIN_TYPE=jellyfin  # Server type (jellyfin or emby)
+
+    # ========================================================================
+    # Volume Mappings
+    # ========================================================================
+    volumes:
+      # Configuration and database
+      - ${CONFIG_ROOT}/jellyseerr:/app/config
+
+    # ========================================================================
+    # Resource Limits (Optional)
+    # ========================================================================
+    # Uncomment to limit resources if needed
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '1.0'
+    #       memory: 512M
+    #     reservations:
+    #       memory: 256M
+
+    # ========================================================================
+    # Labels
+    # ========================================================================
+    labels:
+      - "com.brothereye.service=jellyseerr"
+      - "com.brothereye.description=Media request management for Jellyfin"
+      - "com.brothereye.port=5055"
+      - "com.brothereye.url=http://localhost:5055"
+
+    # ========================================================================
+    # Health Check
+    # ========================================================================
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5055/api/v1/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+# ============================================================================
+# Network Definition
+# ============================================================================
+# Uses external network defined in main docker-compose.yml
+networks:
+  media-network:
+    external: true
+
+# ============================================================================
+# Configuration Notes
+# ============================================================================
+#
+# FIRST-TIME SETUP:
+# 1. Access Jellyseerr at http://<host-ip>:5055
+# 2. Click "Use your Jellyfin account"
+# 3. Configure Jellyfin connection:
+#    - Server URL: http://jellyfin:8096
+#    - Or external URL if accessing remotely
+# 4. Sign in with your Jellyfin administrator account
+#    - First user to sign in becomes Jellyseerr admin
+# 5. Complete initial setup wizard
+#
+# JELLYFIN INTEGRATION:
+# 1. Navigate to Settings → Jellyfin
+# 2. Configure Jellyfin server:
+#    - Hostname/IP: jellyfin
+#    - Port: 8096
+#    - Use SSL: No (internal Docker network)
+#    - External URL: http://<external-ip>:8096 (if needed)
+# 3. Get Jellyfin API key:
+#    - In Jellyfin: Dashboard → API Keys
+#    - Create new key named "Jellyseerr"
+#    - Copy and paste into Jellyseerr
+# 4. Test connection and save
+# 5. Enable "Import Jellyfin Users" to sync existing users
+# 6. Configure library sync settings
+#
+# SONARR INTEGRATION (TV SHOWS):
+# 1. Navigate to Settings → Services → Sonarr
+# 2. Click "Add Sonarr Server"
+# 3. Configure connection:
+#    - Server Name: Sonarr (or custom name)
+#    - Hostname/IP: sonarr
+#    - Port: 8989
+#    - Use SSL: No
+#    - API Key: Get from Sonarr → Settings → General → API Key
+# 4. Select default settings:
+#    - Default Quality Profile (e.g., "Any", "HD-1080p")
+#    - Root Folder: /tv
+#    - Language Profile: English (or your preference)
+#    - Default Tags: (optional)
+#    - Anime Quality/Root: (if you watch anime)
+# 5. Enable "Automatic Episode Search"
+# 6. Test and save
+#
+# RADARR INTEGRATION (MOVIES):
+# 1. Navigate to Settings → Services → Radarr
+# 2. Click "Add Radarr Server"
+# 3. Configure connection:
+#    - Server Name: Radarr (or custom name)
+#    - Hostname/IP: radarr
+#    - Port: 7878
+#    - Use SSL: No
+#    - API Key: Get from Radarr → Settings → General → API Key
+# 4. Select default settings:
+#    - Default Quality Profile (e.g., "Any", "HD-1080p")
+#    - Root Folder: /movies
+#    - Minimum Availability: Released (or Announced/In Cinemas)
+#    - Default Tags: (optional)
+# 5. Enable "Automatic Movie Search"
+# 6. Test and save
+#
+# USER MANAGEMENT:
+# - Admin user: First Jellyfin user to log in
+# - Import users: Settings → Users → Import from Jellyfin
+# - Manual users: Can create local users if needed
+# - User permissions:
+#   - Request Movies/TV
+#   - Auto-approve requests (per user)
+#   - Manage requests (approve/deny)
+#   - Admin (full access)
+# - User quotas: Limit requests per day/week/month
+#
+# REQUEST APPROVAL WORKFLOW:
+# Two modes available:
+# 1. Auto-approve all requests (single user or trusted users)
+# 2. Manual approval required (multi-user with oversight)
+#
+# Configure in Settings → Users:
+# - Grant "Auto Approve" permission to trusted users
+# - Leave disabled for users requiring approval
+# - Admins can approve/deny in Requests section
+#
+# NOTIFICATIONS:
+# Jellyseerr can notify via multiple channels when:
+# - Request is pending approval
+# - Request is approved
+# - Content is available
+# - Request is denied
+#
+# Available notification channels:
+# - Discord (webhook)
+# - Telegram (bot)
+# - Email (SMTP)
+# - Slack (webhook)
+# - Pushover
+# - Pushbullet
+# - Webhooks (custom)
+#
+# Configure in Settings → Notifications
+#
+# DISCORD NOTIFICATIONS (EXAMPLE):
+# 1. Create Discord webhook:
+#    - Server Settings → Integrations → Webhooks
+#    - Create webhook, copy URL
+# 2. In Jellyseerr: Settings → Notifications → Discord
+# 3. Paste webhook URL
+# 4. Enable notification types:
+#    - Media Requested
+#    - Media Approved
+#    - Media Available
+#    - Media Failed
+# 5. Customize notification appearance
+# 6. Test and save
+#
+# LIBRARY SYNC:
+# - Jellyseerr syncs with Jellyfin library periodically
+# - Shows request status: "Available" if already in library
+# - Prevents duplicate requests
+# - Configure sync interval: Settings → Jellyfin → Scan Settings
+# - Manual sync: Settings → Jellyfin → Start Scan
+#
+# SEARCH AND DISCOVERY:
+# - Users can search for movies/TV shows
+# - Jellyseerr fetches metadata from TheMovieDB
+# - Shows content status:
+#   - Available (already in library)
+#   - Requested (pending/approved)
+#   - Not Requested (can request)
+# - Displays trailers, cast, ratings, etc.
+# - Similar titles and recommendations
+#
+# REQUEST MANAGEMENT:
+# - View all requests: Requests tab
+# - Filter by status: Pending, Approved, Available, Declined
+# - Filter by type: Movies, TV Shows
+# - Approve/Deny pending requests
+# - Delete requests
+# - Retry failed requests
+# - View request history
+#
+# PERMISSIONS AND QUOTAS:
+# Fine-grained control per user:
+# - Enable/disable movie requests
+# - Enable/disable TV requests
+# - Auto-approve or require approval
+# - Request quotas (per day/week/month)
+# - 4K request permissions (if you have 4K versions)
+# - Admin permissions
+#
+# Configure in Settings → Users → [User] → Permissions
+#
+# 4K SUPPORT (ADVANCED):
+# If you maintain separate 4K libraries:
+# 1. Add separate Sonarr/Radarr instances for 4K
+# 2. Configure in Settings → Services
+# 3. Enable "4K" toggle when adding service
+# 4. Users need "Request 4K" permission
+# 5. Requests show separate HD/4K buttons
+#
+# ISSUES AND TROUBLESHOOTING:
+# - Users can report issues with content
+# - Issue types: Video, Audio, Subtitles, Other
+# - Admins manage issues in Issues tab
+# - Can reprocess or mark as resolved
+# - Optional: Enable issue reporting in Settings
+#
+# MOBILE ACCESS:
+# - Jellyseerr is mobile-responsive
+# - No dedicated mobile app yet
+# - Use mobile browser
+# - Can add to home screen (PWA support)
+# - Works great on iOS and Android
+#
+# SECURITY:
+# - Authentication via Jellyfin (SSO)
+# - Local authentication also available
+# - No built-in 2FA (relies on Jellyfin 2FA)
+# - Consider putting behind reverse proxy
+# - Use HTTPS for remote access
+# - API key protected endpoints
+# - Rate limiting on API
+#
+# REMOTE ACCESS:
+# Option 1: VPN (Recommended)
+# - Connect to home network via WireGuard
+# - Access Jellyseerr at http://jellyseerr:5055
+#
+# Option 2: Reverse Proxy with HTTPS
+# - Use Caddy or Traefik
+# - Configure domain: requests.yourdomain.com
+# - Automatic HTTPS with Let's Encrypt
+# - Set external URL in Jellyseerr settings
+#
+# BACKUP:
+# - Config directory: /opt/docker/config/jellyseerr
+# - Contains SQLite database with all requests/users
+# - Backup before updates
+# - Can be restored by copying back
+# - Export/import not currently supported
+# - Database location: config/db/db.sqlite3
+#
+# PERFORMANCE:
+# - Very lightweight service
+# - Minimal CPU and memory usage
+# - Most load is from TheMovieDB API calls
+# - Cache improves performance
+# - Scales well even with many users
+# - Can handle hundreds of requests
+#
+# UPDATES:
+# - Jellyseerr updates regularly
+# - Check releases: github.com/Fallenbagel/jellyseerr
+# - Docker: docker-compose pull jellyseerr
+# - Backup before updating
+# - Usually no breaking changes
+# - Database migrations automatic
+#
+# COMPARISON: JELLYSEERR VS OVERSEERR:
+# - Jellyseerr: Fork of Overseerr for Jellyfin/Emby
+# - Overseerr: Original project, Plex-focused (now supports Jellyfin)
+# - Jellyseerr has better Jellyfin integration currently
+# - Future: Overseerr may fully support Jellyfin, potentially deprecating Jellyseerr
+# - For now: Jellyseerr is the best choice for Jellyfin users
+#
+# ADVANCED FEATURES:
+# - Multiple Sonarr/Radarr instances (4K, kids content, etc.)
+# - Request limits and quotas
+# - Auto-delete requests after availability
+# - Issue reporting system
+# - Webhook notifications for custom integrations
+# - Request comments and discussions
+# - Watch trailers in-app
+# - Collection requests (Marvel, Star Wars, etc.)
+#
+# COMMON ISSUES:
+# 1. "Connection failed" to Jellyfin/Sonarr/Radarr
+#    - Verify services are running: docker ps
+#    - Check network: docker exec jellyseerr ping jellyfin
+#    - Verify API keys are correct
+#    - Check firewall rules
+#
+# 2. Users can't log in
+#    - Ensure Jellyfin integration configured
+#    - Verify Jellyfin API key valid
+#    - Check Jellyfin user has permission to access
+#    - Try importing users manually
+#
+# 3. Requests not sending to Sonarr/Radarr
+#    - Verify Sonarr/Radarr connected and tested
+#    - Check quality profiles and root folders configured
+#    - Ensure "Automatic Search" enabled
+#    - Check Sonarr/Radarr logs for errors
+#
+# 4. Library not syncing
+#    - Manually trigger scan in Settings
+#    - Check Jellyfin API key permissions
+#    - Verify Jellyfin libraries accessible
+#    - Check logs: /opt/docker/config/jellyseerr/logs/
+#
+# LOGS:
+# - Location: /opt/docker/config/jellyseerr/logs/
+# - Log level: Set via LOG_LEVEL environment variable
+# - Levels: debug, info, warn, error
+# - Debug mode for troubleshooting
+# - Logs auto-rotate
+#
+# ALTERNATIVE SETUP:
+# If you prefer Overseerr (Plex-oriented but works with Jellyfin):
+# - image: sctx/overseerr:latest
+# - Port: 5055 (same)
+# - Configuration similar but UI differs
+# - Better for mixed Plex/Jellyfin environments
+#
+# RESOURCES:
+# - GitHub: https://github.com/Fallenbagel/jellyseerr
+# - Documentation: https://docs.jellyseerr.dev/
+# - Discord: https://discord.gg/ckbvBtDJgC
+# - Overseerr docs (similar): https://docs.overseerr.dev/
+#
+# ============================================================================

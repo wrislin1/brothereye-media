@@ -1,0 +1,93 @@
+# Brother Eye Media Stack - Git Ignore Rules
+# Keep sensitive data and runtime files out of version control
+
+# ============================================
+# CRITICAL: Sensitive Files
+# ============================================
+
+# Environment files (actual secrets)
+.env
+.env.local
+.env.production
+*.env
+!.env.example
+
+# API Keys and Tokens
+**/api_key*
+**/api-key*
+**/*_token*
+**/*_secret*
+**/apikey*
+
+# SSH and VPN Keys
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+*.ppk
+wg0.conf
+wireguard.conf
+!.gitkeep
+
+# GPG Keys (exported keys should be backed up separately)
+*.asc
+*.gpg
+!git-crypt.key
+
+# ============================================
+# Docker Runtime Data
+# ============================================
+
+# Config directories (contain databases, settings, metadata)
+config/
+!config/.gitkeep
+
+# Cache and temporary data
+cache/
+logs/
+data/
+tmp/
+temp/
+*.tmp
+
+# Docker volumes
+volumes/
+
+# ============================================
+# Backups
+# ============================================
+
+backups/
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.zip
+*.7z
+*.rar
+*.backup
+
+# ============================================
+# NFS/Storage Mount Points
+# ============================================
+
+mnt/
+media/
+downloads/
+
+# ============================================
+# OS and Editor Files
+# ============================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux

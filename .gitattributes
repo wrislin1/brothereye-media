@@ -1,0 +1,106 @@
+# Brother Eye Media Stack - Git Attributes
+# Defines which files git-crypt should encrypt
+
+# ============================================
+# Git-Crypt Encrypted Files
+# ============================================
+# These files will be encrypted in the repository
+# and decrypted automatically when you unlock with:
+# git-crypt unlock
+
+# Production environment files (actual credentials)
+.env.production filter=git-crypt diff=git-crypt
+docker/.env.production filter=git-crypt diff=git-crypt
+**/.env.production filter=git-crypt diff=git-crypt
+
+# Secrets directory (everything inside is encrypted)
+secrets/** filter=git-crypt diff=git-crypt
+
+# VPN Configuration files
+**/wg0.conf filter=git-crypt diff=git-crypt
+**/wireguard.conf filter=git-crypt diff=git-crypt
+secrets/wireguard/** filter=git-crypt diff=git-crypt
+
+# Private keys (but not .example templates)
+secrets/**/*.key filter=git-crypt diff=git-crypt
+secrets/**/*.pem filter=git-crypt diff=git-crypt
+
+# API keys and tokens stored in secrets directory
+secrets/**/*api* filter=git-crypt diff=git-crypt
+secrets/**/*token* filter=git-crypt diff=git-crypt
+secrets/**/*secret* filter=git-crypt diff=git-crypt
+
+# SSH keys in secrets directory
+secrets/**/*id_rsa* filter=git-crypt diff=git-crypt
+secrets/**/*id_ed25519* filter=git-crypt diff=git-crypt
+
+# ============================================
+# Normal Git Handling (NOT Encrypted)
+# ============================================
+# These are explicitly NOT encrypted even if they match patterns above
+
+# Example/template files are never encrypted
+*.example -filter -diff
+**/.env.example -filter -diff
+**/*.example -filter -diff
+
+# Documentation files
+*.md -filter -diff
+**/*.md -filter -diff
+
+# Scripts (unless in secrets directory)
+*.sh -filter -diff
+
+# Configuration templates
+**/*.template -filter -diff
+**/*.tmpl -filter -diff
+
+# ============================================
+# Git LFS (Large File Storage) - Optional
+# ============================================
+# If you ever need to track large binary files
+# Uncomment these lines and install git-lfs
+
+# *.tar.gz filter=lfs diff=lfs merge=lfs -text
+# *.zip filter=lfs diff=lfs merge=lfs -text
+# *.iso filter=lfs diff=lfs merge=lfs -text
+
+# ============================================
+# Line Ending Normalization
+# ============================================
+# Ensure consistent line endings across platforms
+
+# Text files should have LF endings in repository
+* text=auto
+
+# Shell scripts
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Config files
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.conf text eol=lf
+*.cfg text eol=lf
+
+# Documentation
+*.md text eol=lf
+*.txt text eol=lf
+
+# Docker files
+Dockerfile text eol=lf
+Caddyfile text eol=lf
+
+# Binary files (don't attempt text normalization)
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.mov binary
+*.mp4 binary
+*.mp3 binary
+*.gz binary
+*.zip binary
+*.tar binary

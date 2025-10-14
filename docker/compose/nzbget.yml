@@ -1,0 +1,223 @@
+################################################################################
+# NZBGet - Usenet Downloader
+#
+# NZBGet is a high-performance Usenet downloader optimized for low-resource usage.
+# All traffic routes through Gluetun's VPN tunnel for privacy.
+#
+# Key Features:
+#   - Efficient binary newsreader
+#   - RSS feed support
+#   - Post-processing scripts
+#   - Web-based interface
+#   - API for automation (Sonarr/Radarr)
+#   - PAR2 repair and unrar built-in
+#
+# Network Architecture:
+#   - Uses network_mode: service:gluetun
+#   - ALL traffic (downloads, API, DNS) routes through VPN
+#   - No direct internet access - VPN kill-switch protection
+#   - Accessed via ports exposed in gluetun.yml
+#
+# Documentation: https://nzbget.com/documentation
+################################################################################
+
+services:
+  nzbget:
+    image: lscr.io/linuxserver/nzbget:latest
+    container_name: nzbget
+    hostname: nzbget
+    
+    # CRITICAL: Route all traffic through Gluetun's VPN
+    # This means NZBGet shares Gluetun's network stack
+    network_mode: service:gluetun
+    
+    # Dependency: Wait for Gluetun to be healthy before starting
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    
+    # NO PORTS SECTION HERE!
+    # Ports are exposed by Gluetun container (see gluetun.yml)
+    # NZBGet's port 6789 is accessible via Gluetun's network
+    
+    # Environment variables
+    environment:
+      # User and Group IDs (must match NAS permissions)
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-100}
+      
+      # Timezone
+      - TZ=${TZ:-America/New_York}
+      
+      # NZBGet configuration
+      # Note: Most settings configured via web UI
+      # These are just container-level settings
+      
+      # Optional: Set umask for file permissions
+      - UMASK=002
+    
+    # Volumes for persistent data
+    volumes:
+      # NZBGet configuration directory
+      # Contains nzbget.conf and scripts
+      - ${CONFIG_BASE:-/opt/docker/config}/nzbget:/config
+      
+      # Download directories
+      # Incomplete downloads (temp storage, use fast NVMe)
+      - ${INCOMPLETE_DIR:-/mnt/media/downloads/incomplete}:/downloads/incomplete
+      
+      # Completed downloads (before post-processing)
+      - ${COMPLETE_DIR:-/mnt/media/downloads/complete}:/downloads/complete
+      
+      # Final destination directories (Sonarr/Radarr move files here)
+      - ${DOWNLOADS_DIR:-/mnt/media/downloads}:/downloads
+      
+      # Media libraries (for post-processing scripts that might need access)
+      - ${MOVIES_DIR:-/mnt/media/Movies}:/movies
+      - ${TV_DIR:-/mnt/media/TV}:/tv
+      
+      # Optional: Scripts directory
+      # Mount custom post-processing scripts here
+      # - ./nzbget-scripts:/scripts:ro
+    
+    # Restart policy
+    restart: ${RESTART_POLICY:-unless-stopped}
+    
+    # Health check
+    # Checks if NZBGet web interface is responding
+    # Note: Uses localhost since we're in Gluetun's network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6789", "||", "exit", "1"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    
+    # Resource limits (optional)
+    deploy:
+      resources:
+        limits:
+          memory: ${NZBGET_MEM_LIMIT:-2g}
+        reservations:
+          memory: 256m
+    
+    # Labels for management
+    labels:
+      - "com.brothereye.service=nzbget"
+      - "com.brothereye.description=Usenet downloader via VPN"
+      - "com.brothereye.group=downloads"
+      - "com.brothereye.vpn=true"
+      - "com.brothereye.url=http://${LXC_IP}:6789"
+
+################################################################################
+# NOTES
+################################################################################
+
+# Initial Setup:
+#   1. Access web UI: http://LXC_IP:6789
+#   2. Default credentials: nzbget / tegbzn6789
+#   3. Change password immediately in Settings → Security
+#   4. Add news servers in Settings → News Servers:
+#      - Newshosting: news.newshosting.com:563 (SSL)
+#      - Easynews: news.easynews.com:563 (SSL)
+#   5. Configure categories (Movies, TV, etc.)
+#   6. Set up post-processing scripts if needed
+#
+# Directory Structure:
+#   /downloads/incomplete - Active downloads (fast storage)
+#   /downloads/complete - Finished downloads (before post-processing)
+#   /downloads - Final location (Sonarr/Radarr will move files)
+#   /movies - Movie library (Radarr manages)
+#   /tv - TV library (Sonarr manages)
+#
+# Post-Processing:
+#   NZBGet automatically:
+#   - Verifies downloads with PAR2
+#   - Repairs corrupted files
+#   - Extracts archives (unrar)
+#   - Runs custom scripts
+#   - Notifies Sonarr/Radarr
+#
+# Integration with *Arr Apps:
+#   Sonarr/Radarr send NZB files to NZBGet via API
+#   NZBGet downloads, processes, and moves to category folder
+#   Sonarr/Radarr import the files and rename them
+#
+# VPN Verification:
+#   Since NZBGet uses Gluetun's network:
+#   1. Check Gluetun's public IP: docker compose exec gluetun wget -qO- ifconfig.me
+#   2. All NZBGet traffic uses that IP
+#   3. If VPN drops, NZBGet loses connectivity (kill-switch)
+#
+# Performance Tuning:
+#   Settings → Performance:
+#   - ArticleCache: 500-1000 MB (faster unpacking)
+#   - WriteBuffer: 1024 KB (better disk I/O)
+#   - ParBuffer: 500 MB (faster repair)
+#   - Connections per server: 20-30 (don't exceed provider limits)
+#
+# Troubleshooting:
+#   1. Check logs: docker compose logs nzbget
+#   2. Verify VPN is active: docker compose exec gluetun wget -qO- ifconfig.me
+#   3. Test news server in NZBGet UI → Settings → News Servers
+#   4. Check permissions on download directories (should be 1000:100)
+#   5. Verify Gluetun port 6789 is exposed
+#
+# Accessing NZBGet:
+#   - From LAN: http://LXC_IP:6789
+#   - From within Docker network: http://gluetun:6789
+#   - Sonarr/Radarr will use: http://gluetun:6789
+#
+# Security:
+#   - All traffic encrypted via VPN (WireGuard)
+#   - SSL connections to news servers (port 563)
+#   - No ISP visibility into downloads
+#   - Kill-switch prevents leaks if VPN fails
+#
+# API Access:
+#   For Sonarr/Radarr integration:
+#   - Host: gluetun (not nzbget!)
+#   - Port: 6789
+#   - Username: (your NZBGet username)
+#   - Password: (your NZBGet password)
+#   - Use SSL: No (internal Docker network)
+#
+# News Server Configuration:
+#   Newshosting (Primary):
+#   - Host: news.newshosting.com
+#   - Port: 563
+#   - Encryption: Yes (SSL)
+#   - Connections: 30
+#   - Username: ${NEWSHOSTING_USERNAME}
+#   - Password: ${NEWSHOSTING_PASSWORD}
+#
+#   Easynews (Backup):
+#   - Host: news.easynews.com
+#   - Port: 563
+#   - Encryption: Yes (SSL)
+#   - Connections: 20
+#   - Username: ${EASYNEWS_USERNAME}
+#   - Password: ${EASYNEWS_PASSWORD}
+#   - Level: 1 (backup server)
+#
+# Scripts:
+#   NZBGet supports post-processing scripts in Python/Bash
+#   Popular scripts:
+#   - nzbToMedia (notifies Sonarr/Radarr)
+#   - PasswordDetector (handles password-protected archives)
+#   - DeleteSamples (removes sample videos)
+#   Place scripts in: /config/scripts/
+#
+# Categories:
+#   Create categories matching your *Arr apps:
+#   - movies (Radarr uses this)
+#   - tv (Sonarr uses this)
+#   - music (Lidarr if you add it)
+#   Each category can have different post-processing
+#
+# Maintenance:
+#   - Check logs regularly for failed downloads
+#   - Monitor disk space on /downloads/incomplete
+#   - Update news server credentials if they change
+#   - Review completed downloads folder periodically
+#   - Backup /config/nzbget.conf
