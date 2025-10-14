@@ -73,6 +73,7 @@ backups/
 mnt/
 media/
 downloads/
+.idea/
 
 # ============================================
 # OS and Editor Files
