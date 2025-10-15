@@ -21,9 +21,9 @@ GATEWAY="192.168.80.1"
 DNS="192.168.10.1"
 SEARCHDOMAIN="brothereye.local"
 CORES=8
-MEMORY=12288  # 16 GB
+MEMORY=16384  # 16 GB
 SWAP=0
-DISK=50       # GB
+DISK=100       # GB
 STORAGE="local-lvm"
 TEMPLATE="local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"
 
