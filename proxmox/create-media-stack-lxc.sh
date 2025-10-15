@@ -21,7 +21,7 @@ GATEWAY="192.168.80.1"
 DNS="192.168.10.1"
 SEARCHDOMAIN="brothereye.local"
 CORES=8
-MEMORY=12288  # 12 GB
+MEMORY=12288  # 16 GB
 SWAP=0
 DISK=50       # GB
 STORAGE="local-lvm"
@@ -158,7 +158,7 @@ pct create ${CTID} ${TEMPLATE} \
     --net0 name=eth0,bridge=vmbr0,firewall=1,gw=${GATEWAY},ip=${IP}/24,type=veth \
     --nameserver ${DNS} \
     --searchdomain ${SEARCHDOMAIN} \
-    --features nesting=1 \
+    --features nesting=1,keyctl=1 \
     --unprivileged 1 \
     --onboot 1 \
     --start 0 \
