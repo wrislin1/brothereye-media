@@ -1,0 +1,19 @@
+services:
+  kiwix:
+    image: ghcr.io/kiwix/kiwix-serve:latest
+    container_name: kiwix
+    hostname: kiwix
+    restart: unless-stopped
+    volumes:
+      - /mnt/media/wikipedia/data:/data:ro
+    command:
+      - "/data/wikipedia_en_all_maxi_2025-08.zim"
+    # No host ports needed — Caddy proxies via Docker network.
+    networks:
+      - media-network
+
+    labels:
+      - "com.brothereye.service=kiwix"
+      - "com.brothereye.description=wikipedia"
+      - "com.brothereye.group=automation"
+      - "com.brothereye.url=http://${LXC_IP}:8080"

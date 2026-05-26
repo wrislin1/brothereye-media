@@ -1,0 +1,47 @@
+---
+# ============================================================================
+# LG TV WOL Bridge - HTTP ? Wake-on-LAN for LG C4 (Ethernet interface)
+# Runs in host network mode to allow proper layer-2 broadcast.
+# ============================================================================
+
+services:
+  lg-tv-wol:
+    image: python:3.11-slim
+    container_name: lg-tv-wol
+    hostname: lg-tv-wol
+
+    network_mode: host
+    ports: []   # host mode: no port mappings
+
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-100}
+      - TZ=${TZ:-America/New_York}
+      - UMASK=${UMASK:-002}
+      - TV_IP=192.168.80.194
+      - TV_MAC=00:a1:59:73:61:34
+      - APP_PORT=${LG_TV_WOL_PORT:-8185}
+
+    volumes:
+      - ${CONFIG_BASE:-/opt/docker/config}/lg-tv-wol:/app
+
+    working_dir: /app
+    command: >
+      sh -c "pip install --no-cache-dir -r requirements.txt &&
+             python app.py"
+
+    restart: ${RESTART_POLICY:-unless-stopped}
+    mem_limit: ${LG_TV_WOL_MEM_LIMIT:-128m}
+
+    labels:
+      - "com.brothereye.service=lg-tv-wol"
+      - "com.brothereye.description=HTTP ? Wake-on-LAN bridge for LG C4 TV"
+      - "com.brothereye.group=automation"
+      - "com.brothereye.url=http://${LXC_IP}:${LG_TV_WOL_PORT:-8185}"
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${LG_TV_WOL_PORT:-8185}/health >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

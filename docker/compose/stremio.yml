@@ -1,0 +1,37 @@
+services:
+  stremio:
+    image: tsaridas/stremio-docker:latest
+    container_name: stremio
+    restart: unless-stopped
+
+    # Network: use Gluetun's network namespace (all traffic goes through VPN)
+    network_mode: service:gluetun  # Share network with VPN container:contentReference[oaicite:0]{index=0}
+    depends_on:
+      - gluetun
+
+
+    # Environment variables (from .env.production) for config & auth
+    environment:
+      - TZ=${TZ}                        # Timezone (already defined in .env)
+      - USERNAME=${STREMIO_USERNAME}    # Basic Auth username:contentReference[oaicite:1]{index=1}
+      - PASSWORD=${STREMIO_PASSWORD}    # Basic Auth password:contentReference[oaicite:2]{index=2}
+      - WEBUI_INTERNAL_PORT=${STREMIO_PORT}  # Internal web UI port (override default 8080):contentReference[oaicite:3]{index=3}
+      - AUTO_SERVER_URL=1              # Auto-configure server URL for web app (recommended)
+
+    # Volume mappings
+    volumes:
+      - ${CONFIG_ROOT}/stremio:/root/.stremio-server        # Config/cache directory
+      - ${MEDIA_ROOT}:/mnt/media:ro                        # Media library (read-only):contentReference[oaicite:4]{index=4}
+
+    # Hardware acceleration (GPU passthrough for VAAPI)
+    devices:
+      - /dev/dri:/dev/dri       # Pass host GPU devices (VAAPI):contentReference[oaicite:5]{index=5}
+    group_add:
+      - "44"                    # Add container to video/render group (e.g. GID 44) for GPU access
+
+    # Labels for Brother Eye management UI
+    labels:
+      - "com.brothereye.service=stremio"
+      - "com.brothereye.description=Stremio streaming server (behind VPN)"
+      - "com.brothereye.port=${STREMIO_PORT}"
+      - "com.brothereye.url=http://localhost:${STREMIO_PORT}"

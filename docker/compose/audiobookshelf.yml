@@ -1,0 +1,40 @@
+version: "3.8"
+
+services:
+  audiobookshelf:
+    image: ghcr.io/advplyr/audiobookshelf:latest
+    container_name: audiobookshelf
+    hostname: audiobookshelf
+    restart: unless-stopped
+
+    networks:
+      - media-network
+
+
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-100}
+      - TZ=${TZ:-America/New_York}
+      - UMASK=${UMASK:-002}
+
+    # LAN admin access only — not proxied through Caddy
+    ports:
+      - "192.168.80.110:13378:80"
+
+    volumes:
+      # App config / database
+      - /opt/docker/config/audiobookshelf:/config
+
+      # Libraries
+      - /mnt/media/Audiobooks:/audiobooks
+      - /mnt/media/Podcasts:/podcasts
+
+      # Metadata / cache (optional but recommended)
+      - /opt/docker/config/audiobookshelf/metadata:/metadata
+
+    labels:
+      - "com.brothereye.service=audiobookshelf"
+      - "com.brothereye.description=Media server with hardware transcoding"
+      - "com.brothereye.port=13378"
+      - "com.brothereye.url=http://localhost:13378"
+

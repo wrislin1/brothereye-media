@@ -1,0 +1,32 @@
+version: "3.8"
+
+services:
+  lazylibrarian:
+    image: lscr.io/linuxserver/lazylibrarian:latest
+    container_name: lazylibrarian
+    hostname: lazylibrarian
+    restart: unless-stopped
+
+    networks:
+      - media-network
+
+    environment:
+      - TZ=America/New_York
+      - PUID=1000
+      - PGID=1000
+
+    # LAN admin access only — not proxied through Caddy
+    ports:
+      - "192.168.80.110:5299:5299"
+
+    volumes:
+      - /opt/docker/config/lazylibrarian:/config
+      - /mnt/downloads:/downloads           # Shared with NZBGet
+      - /mnt/media/Audiobooks:/books         # Your audiobook library
+
+    labels:
+      - "com.brothereye.service=lazylibrarian"
+      - "com.brothereye.description=Media server with hardware transcoding"
+      - "com.brothereye.port=5299"
+      - "com.brothereye.url=http://localhost:5299"
+
